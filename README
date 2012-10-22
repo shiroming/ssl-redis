@@ -15,7 +15,7 @@ The home website fo redis is: http://redis.io/
 
 
 This is a work-in-progress. I will be making updates as I test, find bugs, or other issues.
-If you find bugs, or have isues, please contact me at bbroerman@tritonmedia.com
+If you find bugs, or have isues, please contact me at bbroerman@bbroerman.net
 
 
 To enable SSL on redis-server, add these lines to the redis.config:

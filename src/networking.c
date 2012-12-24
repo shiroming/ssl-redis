@@ -479,7 +479,6 @@ void acceptTcpHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
     sslctn.bio = NULL;
     sslctn.conn_str = NULL;
 
-
     cfd = anetTcpAccept(server.neterr, fd, cip, &cport);
     if (cfd == AE_ERR) {
         redisLog(REDIS_WARNING,"Accepting client connection: %s", server.neterr);
@@ -490,7 +489,7 @@ void acceptTcpHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
       redisLog(REDIS_VERBOSE,"Switching connection to SSL");
       int ret = anetSSLAccept( server.neterr, cfd, server, &sslctn );      
       if( ret < 0 ) {
-        redisLog(REDIS_WARNING,"Error accepting SSL client connection" );
+        redisLog(REDIS_WARNING,"Error accepting SSL client connection from %s:%d", cip, cport );
         anetCleanupSSL( &sslctn );
         close( cfd );
         return;

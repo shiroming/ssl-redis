@@ -5,6 +5,9 @@
 #include "redis-server.h"
 #include "util.h"
 
+#define REDIS_RUN_ID_SIZE 40
+#define REDIS_DEFAULT_SLAVE_PRIORITY 100
+
 void _redisAssert(char *estr, char *file, int line);
 void _redisPanic(char *msg, char *file, int line);
 void bugReportStart(void);
@@ -46,6 +49,7 @@ typedef struct vmPointer {
     _var.storage = REDIS_VM_MEMORY; \
 } while(0);
 
+    int slave_listening_port; /* As configured with: SLAVECONF listening-port */
 
 struct sharedObjectsStruct {
     robj *crlf, *ok, *err, *emptybulk, *czero, *cone, *cnegone, *pong, *space,
@@ -58,6 +62,8 @@ struct sharedObjectsStruct {
     *integers[REDIS_SHARED_INTEGERS];
 };
 
+    char runid[REDIS_RUN_ID_SIZE+1];  /* ID always different at every exec. */
+    int slave_priority;             /* Reported in INFO and used by Sentinel. */
 
 typedef struct pubsubPattern {
     redisClient *client;
@@ -583,6 +589,7 @@ void watchCommand(redisClient *c);
 void unwatchCommand(redisClient *c);
 void objectCommand(redisClient *c);
 void clientCommand(redisClient *c);
+void replconfCommand(redisClient *c);
 
 #if defined(__GNUC__)
 void *calloc(size_t count, size_t size) __attribute__ ((deprecated));

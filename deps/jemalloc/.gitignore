@@ -2,6 +2,7 @@
 /config.stamp
 /config.log
 /config.status
+/configure
 /doc/html.xsl
 /doc/manpages.xsl
 /doc/jemalloc.xml
@@ -17,7 +18,7 @@
 /src/*.[od]
 /test/*.[od]
 /test/*.out
-/test/[a-z]*
+/test/[a-zA-Z_]*
 !test/*.c
 !test/*.exp
 /VERSION

@@ -18,6 +18,32 @@ to modify your program in order to use Redis 2.4.
 CHANGELOG
 ---------
 
+What's new in Redis 2.4.18
+==========================
+
+UPGRADE URGENCY: critical if you experienced one more more crashes.
+
+* [BUGFIX] Jemalloc updated to 3.2.0.
+
+What's new in Redis 2.4.17
+==========================
+
+* INFO command now contains the run_id field for Redis Sentinel compatibility.
+* Support for the "slave priority" parameter published via INFO and used by
+  Redis Sentinel.
+* [BUGFIX] An optimization to convert double values into strings was not used
+  because of an error in a preprocessor directive. Now it's fixed. Saving
+  datasets with many sorted sets should be faster.
+* [BUGFIX] Fixed a theoretic bug in the ziplist implementation.
+
+What's new in Redis 2.4.16
+==========================
+
+* INFO command now shows slaves with the correct port number, assuming you
+  use 2.4.16 or greater as slave as well. This makes Redis 2.4.16 compatible
+  with Redis Sentinel. This fix required the introduction of a new internal
+  command called REPLCONF, see commit b998ebe for more information.
+
 What's new in Redis 2.4.15
 ==========================
 

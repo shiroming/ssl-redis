@@ -1,6 +1,6 @@
 /* Redis CLI (command line interface)
  *
- * Copyright (c) 2009-2010, Salvatore Sanfilippo <antirez at gmail dot com>
+ * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -72,6 +72,8 @@ static struct config {
     int monitor_mode;
     int pubsub_mode;
     int latency_mode;
+    int cluster_mode;
+    int cluster_reissue_command;
     int slave_mode;
     int pipe_mode;
     int bigkeys;
@@ -80,6 +82,7 @@ static struct config {
     int output; /* output mode, see OUTPUT_* defines */
     sds mb_delim;
     char prompt[128];
+    char *eval;
 } config;
 
 static void usage();
@@ -95,7 +98,7 @@ static long long mstime(void) {
     long long mst;
 
     gettimeofday(&tv, NULL);
-    mst = ((long)tv.tv_sec)*1000;
+    mst = ((long long)tv.tv_sec)*1000;
     mst += tv.tv_usec/1000;
     return mst;
 }
@@ -503,6 +506,35 @@ static int cliReadReply(int output_raw_strings) {
 
     reply = (redisReply*)_reply;
 
+    /* Check if we need to connect to a different node and reissue the
+     * request. */
+    if (config.cluster_mode && reply->type == REDIS_REPLY_ERROR &&
+        (!strncmp(reply->str,"MOVED",5) || !strcmp(reply->str,"ASK")))
+    {
+        char *p = reply->str, *s;
+        int slot;
+
+        output = 0;
+        /* Comments show the position of the pointer as:
+         *
+         * [S] for pointer 's'
+         * [P] for pointer 'p'
+         */
+        s = strchr(p,' ');      /* MOVED[S]3999 127.0.0.1:6381 */
+        p = strchr(s+1,' ');    /* MOVED[S]3999[P]127.0.0.1:6381 */
+        *p = '\0';
+        slot = atoi(s+1);
+        s = strchr(p+1,':');    /* MOVED 3999[P]127.0.0.1[S]6381 */
+        *s = '\0';
+        sdsfree(config.hostip);
+        config.hostip = sdsnew(p+1);
+        config.hostport = atoi(s+1);
+        if (config.interactive)
+            printf("-> Redirected to slot [%d] located at %s:%d\n",
+                slot, config.hostip, config.hostport);
+        config.cluster_reissue_command = 1;
+    }
+
     if (output) {
         if (output_raw_strings) {
             out = cliFormatReplyRaw(reply);
@@ -538,6 +570,9 @@ static int cliSendCommand(int argc, char **argv, int repeat) {
 
     output_raw = 0;
     if (!strcasecmp(command,"info") ||
+        (argc == 2 && !strcasecmp(command,"cluster") &&
+                      (!strcasecmp(argv[1],"nodes") ||
+                       !strcasecmp(argv[1],"info"))) ||
         (argc == 2 && !strcasecmp(command,"client") &&
                        !strcasecmp(argv[1],"list")))
 
@@ -640,6 +675,10 @@ static int parseOptions(int argc, char **argv) {
             config.pipe_mode = 1;
         } else if (!strcmp(argv[i],"--bigkeys")) {
             config.bigkeys = 1;
+        } else if (!strcmp(argv[i],"--eval") && !lastarg) {
+            config.eval = argv[++i];
+        } else if (!strcmp(argv[i],"-c")) {
+            config.cluster_mode = 1;
         } else if (!strcmp(argv[i],"-d") && !lastarg) {
             sdsfree(config.mb_delim);
             config.mb_delim = sdsnew(argv[++i]);
@@ -699,15 +738,17 @@ static void usage() {
 "  -a <password>       Password to use when connecting to the server\n"
 "  -r <repeat>         Execute specified command N times\n"
 "  -i <interval>       When -r is used, waits <interval> seconds per command.\n"
-"                      It is possible to specify sub-second times like -i 0.1.\n"
+"                   It is possible to specify sub-second times like -i 0.1\n"
 "  -n <db>             Database number\n"
 "  -x                  Read last argument from STDIN\n"
 "  -d <delimiter>      Multi-bulk delimiter in for raw formatting (default: \\n)\n"
+"  -c               Enable cluster mode (follow -ASK and -MOVED redirections)\n"
 "  --raw               Use raw formatting for replies (default when STDOUT is not a tty)\n"
-"  --latency           Enter a special mode continuously sampling latency.\n"
-"  --slave             Simulate a slave showing commands received from the master.\n"
-"  --pipe              Transfer raw Redis protocol from stdin to server.\n"
-"  --bigkeys           Sample Redis keys looking for big keys.\n"
+"  --latency        Enter a special mode continuously sampling latency\n"
+"  --slave          Simulate a slave showing commands received from the master\n"
+"  --pipe           Transfer raw Redis protocol from stdin to server\n"
+"  --bigkeys        Sample Redis keys looking for big keys\n"
+"  --eval <file>    Send an EVAL command using the Lua script at <file>\n"
 "  --help              Output this help and exit\n"
 "  --version           Output version and exit\n"
 "\n"
@@ -716,6 +757,8 @@ static void usage() {
 "  redis-cli get mypasswd\n"
 "  redis-cli -r 100 lpush mylist x\n"
 "  redis-cli -r 100 -i 1 info | grep used_memory_human:\n"
+"  redis-cli --eval myscript.lua key1 key2 , arg1 arg2 arg3\n"
+"  (Note: when using --eval the comma separates KEYS[] from ARGV[] items)\n"
 "\n"
 "When no command is given, redis-cli starts in interactive mode.\n"
 "Type \"help\" in interactive mode for information on available commands.\n"
@@ -791,16 +834,25 @@ static void repl() {
                         repeat = 1;
                     }
 
-                    if (cliSendCommand(argc-skipargs,argv+skipargs,repeat)
-                        != REDIS_OK)
-                    {
-                        cliConnect(1);
-
-                        /* If we still cannot send the command print error.
-                         * We'll try to reconnect the next time. */
+                    while (1) {
+                        config.cluster_reissue_command = 0;
                         if (cliSendCommand(argc-skipargs,argv+skipargs,repeat)
                             != REDIS_OK)
-                            cliPrintContextError();
+                        {
+                            cliConnect(1);
+
+                            /* If we still cannot send the command print error.
+                             * We'll try to reconnect the next time. */
+                            if (cliSendCommand(argc-skipargs,argv+skipargs,repeat)
+                                != REDIS_OK)
+                                cliPrintContextError();
+                        }
+                        /* Issue the command again if we got redirected in cluster mode */
+                        if (config.cluster_mode && config.cluster_reissue_command) {
+                            cliConnect(1);
+                        } else {
+                            break;
+                        }
                     }
                     elapsed = mstime()-start_time;
                     if (elapsed >= 500) {
@@ -829,6 +881,44 @@ static int noninteractive(int argc, char **argv) {
         retval = cliSendCommand(argc, argv, config.repeat);
     }
     return retval;
+}
+
+static int evalMode(int argc, char **argv) {
+    sds script = sdsempty();
+    FILE *fp;
+    char buf[1024];
+    size_t nread;
+    char **argv2;
+    int j, got_comma = 0, keys = 0;
+
+    /* Load the script from the file, as an sds string. */
+    fp = fopen(config.eval,"r");
+    if (!fp) {
+        fprintf(stderr,
+            "Can't open file '%s': %s\n", config.eval, strerror(errno));
+        exit(1);
+    }
+    while((nread = fread(buf,1,sizeof(buf),fp)) != 0) {
+        script = sdscatlen(script,buf,nread);
+    }
+    fclose(fp);
+
+    /* Create our argument vector */
+    argv2 = zmalloc(sizeof(sds)*(argc+3));
+    argv2[0] = sdsnew("EVAL");
+    argv2[1] = script;
+    for (j = 0; j < argc; j++) {
+        if (!got_comma && argv[j][0] == ',' && argv[j][1] == 0) {
+            got_comma = 1;
+            continue;
+        }
+        argv2[j+3-got_comma] = sdsnew(argv[j]);
+        if (!got_comma) keys++;
+    }
+    argv2[2] = sdscatprintf(sdsempty(),"%d",keys);
+
+    /* Call it */
+    return cliSendCommand(argc+3-got_comma, argv2, config.repeat);
 }
 
 static void latencyMode(void) {
@@ -1103,7 +1193,7 @@ static void findBigKeys(void) {
 
         reply3 = redisCommand(context,"%s %s", sizecmd, reply1->str);
         if (reply3 && reply3->type == REDIS_REPLY_INTEGER) {
-            if (biggest[type] < (unsigned)reply3->integer) {
+            if (biggest[type] < reply3->integer) {
                 printf("[%6s] %s | biggest so far with size %llu\n",
                     typename[type], reply1->str,
                     (unsigned long long) reply3->integer);
@@ -1139,12 +1229,14 @@ int main(int argc, char **argv) {
     config.monitor_mode = 0;
     config.pubsub_mode = 0;
     config.latency_mode = 0;
+    config.cluster_mode = 0;
     config.slave_mode = 0;
     config.pipe_mode = 0;
     config.bigkeys = 0;
     config.stdinarg = 0;
     config.ssl = 0;
     config.auth = NULL;
+    config.eval = NULL;
     if (!isatty(fileno(stdout)) && (getenv("FAKETTY") == NULL))
         config.output = OUTPUT_RAW;
     else
@@ -1170,7 +1262,7 @@ int main(int argc, char **argv) {
 
     /* Pipe mode */
     if (config.pipe_mode) {
-        cliConnect(0);
+        if (cliConnect(0) == REDIS_ERR) exit(1);
         pipeMode();
     }
 
@@ -1181,7 +1273,7 @@ int main(int argc, char **argv) {
     }
 
     /* Start interactive mode when no command is provided */
-    if (argc == 0) {
+    if (argc == 0 && !config.eval) {
         /* Note that in repl mode we don't abort on connection error.
          * A new attempt will be performed for every command send. */
         cliConnect(0);
@@ -1190,5 +1282,9 @@ int main(int argc, char **argv) {
 
     /* Otherwise, we have some arguments to execute */
     if (cliConnect(0) != REDIS_OK) exit(1);
-    return noninteractive(argc,convertToSds(argc,argv));
+    if (config.eval) {
+        return evalMode(argc,argv);
+    } else {
+        return noninteractive(argc,convertToSds(argc,argv));
+    }
 }

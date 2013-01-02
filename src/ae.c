@@ -37,6 +37,7 @@
 #include <stdlib.h>
 #include <poll.h>
 #include <string.h>
+#include <time.h>
 
 #include "ae.h"
 #include "zmalloc.h"
@@ -44,40 +45,55 @@
 
 /* Include the best multiplexing layer supported by this system.
  * The following should be ordered by performances, descending. */
-#ifdef HAVE_EPOLL
-#include "ae_epoll.c"
+#ifdef HAVE_EVPORT
+#include "ae_evport.c"
 #else
-    #ifdef HAVE_KQUEUE
-    #include "ae_kqueue.c"
+    #ifdef HAVE_EPOLL
+    #include "ae_epoll.c"
     #else
-    #include "ae_select.c"
+        #ifdef HAVE_KQUEUE
+        #include "ae_kqueue.c"
+        #else
+        #include "ae_select.c"
+        #endif
     #endif
 #endif
 
-aeEventLoop *aeCreateEventLoop(void) {
+aeEventLoop *aeCreateEventLoop(int setsize) {
     aeEventLoop *eventLoop;
     int i;
 
-    eventLoop = zmalloc(sizeof(*eventLoop));
-    if (!eventLoop) return NULL;
+    if ((eventLoop = zmalloc(sizeof(*eventLoop))) == NULL) goto err;
+    eventLoop->events = zmalloc(sizeof(aeFileEvent)*setsize);
+    eventLoop->fired = zmalloc(sizeof(aeFiredEvent)*setsize);
+    if (eventLoop->events == NULL || eventLoop->fired == NULL) goto err;
+    eventLoop->setsize = setsize;
+    eventLoop->lastTime = time(NULL);
     eventLoop->timeEventHead = NULL;
     eventLoop->timeEventNextId = 0;
     eventLoop->stop = 0;
     eventLoop->maxfd = -1;
     eventLoop->beforesleep = NULL;
-    if (aeApiCreate(eventLoop) == -1) {
-        zfree(eventLoop);
-        return NULL;
-    }
+    if (aeApiCreate(eventLoop) == -1) goto err;
     /* Events with mask == AE_NONE are not set. So let's initialize the
      * vector with it. */
-    for (i = 0; i < AE_SETSIZE; i++)
+    for (i = 0; i < setsize; i++)
         eventLoop->events[i].mask = AE_NONE;
     return eventLoop;
+
+err:
+    if (eventLoop) {
+        zfree(eventLoop->events);
+        zfree(eventLoop->fired);
+        zfree(eventLoop);
+    }
+    return NULL;
 }
 
 void aeDeleteEventLoop(aeEventLoop *eventLoop) {
     aeApiFree(eventLoop);
+    zfree(eventLoop->events);
+    zfree(eventLoop->fired);
     zfree(eventLoop);
 }
 
@@ -88,7 +104,7 @@ void aeStop(aeEventLoop *eventLoop) {
 int aeCreateFileEvent(aeEventLoop *eventLoop, int fd, int mask,
         aeFileProc *proc, void *clientData, int clientDataType )
 {
-    if (fd >= AE_SETSIZE) return AE_ERR;
+    if (fd >= eventLoop->setsize) return AE_ERR;
     aeFileEvent *fe = &eventLoop->events[fd];
 
     if (aeApiAddEvent(eventLoop, fd, mask) == -1)
@@ -105,7 +121,7 @@ int aeCreateFileEvent(aeEventLoop *eventLoop, int fd, int mask,
 
 void aeDeleteFileEvent(aeEventLoop *eventLoop, int fd, int mask)
 {
-    if (fd >= AE_SETSIZE) return;
+    if (fd >= eventLoop->setsize) return;
     aeFileEvent *fe = &eventLoop->events[fd];
 
     if (fe->mask == AE_NONE) return;
@@ -122,7 +138,7 @@ void aeDeleteFileEvent(aeEventLoop *eventLoop, int fd, int mask)
 }
 
 int aeGetFileEvents(aeEventLoop *eventLoop, int fd) {
-    if (fd >= AE_SETSIZE) return 0;
+    if (fd >= eventLoop->setsize) return 0;
     aeFileEvent *fe = &eventLoop->events[fd];
 
     return fe->mask;
@@ -223,6 +239,24 @@ static int processTimeEvents(aeEventLoop *eventLoop) {
     int processed = 0;
     aeTimeEvent *te;
     long long maxId;
+    time_t now = time(NULL);
+
+    /* If the system clock is moved to the future, and then set back to the
+     * right value, time events may be delayed in a random way. Often this
+     * means that scheduled operations will not be performed soon enough.
+     *
+     * Here we try to detect system clock skews, and force all the time
+     * events to be processed ASAP when this happens: the idea is that
+     * processing events earlier is less dangerous than delaying them
+     * indefinitely, and practice suggests it is. */
+    if (now < eventLoop->lastTime) {
+        te = eventLoop->timeEventHead;
+        while(te) {
+            te->when_sec = 0;
+            te = te->next;
+        }
+    }
+    eventLoop->lastTime = now;
 
     te = eventLoop->timeEventHead;
     maxId = eventLoop->timeEventNextId-1;

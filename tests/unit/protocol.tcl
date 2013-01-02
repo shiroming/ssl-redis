@@ -68,7 +68,7 @@ start_server {tags {"protocol"}} {
             puts -nonewline $s $seq
             set payload [string repeat A 1024]"\n"
             set test_start [clock seconds]
-            set test_time_limit 5
+            set test_time_limit 30
             while 1 {
                 if {[catch {
                     puts -nonewline $s payload
@@ -90,4 +90,20 @@ start_server {tags {"protocol"}} {
         } {*Protocol error*}
     }
     unset c
+}
+
+start_server {tags {"regression"}} {
+    test "Regression for a crash with blocking ops and pipelining" {
+        set rd [redis_deferring_client]
+        set fd [r channel]
+        set proto "*3\r\n\$5\r\nBLPOP\r\n\$6\r\nnolist\r\n\$1\r\n0\r\n"
+        puts -nonewline $fd $proto$proto
+        flush $fd
+        set res {}
+
+        $rd rpush nolist a
+        $rd read
+        $rd rpush nolist a
+        $rd read
+    }
 }

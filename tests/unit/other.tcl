@@ -107,7 +107,7 @@ start_server {tags {"other"}} {
         }
     }
 
-    test {EXPIRES after a reload (snapshot + append only file)} {
+    test {EXPIRES after a reload (snapshot + append only file rewrite)} {
         r flushdb
         r set x 10
         r expire x 1000
@@ -122,6 +122,45 @@ start_server {tags {"other"}} {
         set e2 [expr {$ttl > 900 && $ttl <= 1000}]
         list $e1 $e2
     } {1 1}
+
+    test {EXPIRES after AOF reload (without rewrite)} {
+        r flushdb
+        r config set appendonly yes
+        r set x somevalue
+        r expire x 1000
+        r setex y 2000 somevalue
+        r set z somevalue
+        r expireat z [expr {[clock seconds]+3000}]
+
+        # Milliseconds variants
+        r set px somevalue
+        r pexpire px 1000000
+        r psetex py 2000000 somevalue
+        r set pz somevalue
+        r pexpireat pz [expr {([clock seconds]+3000)*1000}]
+
+        # Reload and check
+        waitForBgrewriteaof r
+        # We need to wait two seconds to avoid false positives here, otherwise
+        # the DEBUG LOADAOF command may read a partial file.
+        # Another solution would be to set the fsync policy to no, since this
+        # prevents write() to be delayed by the completion of fsync().
+        after 2000
+        r debug loadaof
+        set ttl [r ttl x]
+        assert {$ttl > 900 && $ttl <= 1000}
+        set ttl [r ttl y]
+        assert {$ttl > 1900 && $ttl <= 2000}
+        set ttl [r ttl z]
+        assert {$ttl > 2900 && $ttl <= 3000}
+        set ttl [r ttl px]
+        assert {$ttl > 900 && $ttl <= 1000}
+        set ttl [r ttl py]
+        assert {$ttl > 1900 && $ttl <= 2000}
+        set ttl [r ttl pz]
+        assert {$ttl > 2900 && $ttl <= 3000}
+        r config set appendonly no
+    }
 
     tags {protocol} {
         test {PIPELINING stresser (also a regression for the old epoll bug)} {
@@ -153,53 +192,6 @@ start_server {tags {"other"}} {
             set _ 1
         } {1}
     }
-
-    test {MUTLI / EXEC basics} {
-        r del mylist
-        r rpush mylist a
-        r rpush mylist b
-        r rpush mylist c
-        r multi
-        set v1 [r lrange mylist 0 -1]
-        set v2 [r ping]
-        set v3 [r exec]
-        list $v1 $v2 $v3
-    } {QUEUED QUEUED {{a b c} PONG}}
-
-    test {DISCARD} {
-        r del mylist
-        r rpush mylist a
-        r rpush mylist b
-        r rpush mylist c
-        r multi
-        set v1 [r del mylist]
-        set v2 [r discard]
-        set v3 [r lrange mylist 0 -1]
-        list $v1 $v2 $v3
-    } {QUEUED OK {a b c}}
-
-    test {Nested MULTI are not allowed} {
-        set err {}
-        r multi
-        catch {[r multi]} err
-        r exec
-        set _ $err
-    } {*ERR MULTI*}
-
-    test {MULTI where commands alter argc/argv} {
-        r sadd myset a
-        r multi
-        r spop myset
-        list [r exec] [r exists myset]
-    } {a 0}
-
-    test {WATCH inside MULTI is not allowed} {
-        set err {}
-        r multi
-        catch {[r watch x]} err
-        r exec
-        set _ $err
-    } {*ERR WATCH*}
 
     test {APPEND basics} {
         list [r append foo bar] [r get foo] \

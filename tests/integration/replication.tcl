@@ -4,7 +4,7 @@ start_server {tags {"repl"}} {
             r -1 slaveof [srv 0 host] [srv 0 port]
             wait_for_condition 50 100 {
                 [s -1 role] eq {slave} &&
-                [string match {*master_link_status:up*} [r -1 info]]
+                [string match {*master_link_status:up*} [r -1 info replication]]
             } else {
                 fail "Can't turn the instance into a slave"
             }
@@ -61,9 +61,13 @@ start_server {tags {"repl"}} {
         
         test {SET on the master should immediately propagate} {
             r -1 set mykey bar
-            if {$::valgrind} {after 2000}
-            r  0 get mykey
-        } {bar}
+
+            wait_for_condition 500 100 {
+                [r  0 get mykey] eq {bar}
+            } else {
+                fail "SET on master did not propagated on slave"
+            }
+        }
 
         test {FLUSHALL should replicate} {
             r -1 flushall
@@ -104,7 +108,7 @@ start_server {tags {"repl"}} {
                     [lindex $slaves 2] slaveof $master_host $master_port
 
                     # Wait for all the three slaves to reach the "online" state
-                    set retry 100
+                    set retry 500
                     while {$retry} {
                         set info [r -3 info]
                         if {[string match {*slave0:*,online*slave1:*,online*slave2:*,online*} $info]} {

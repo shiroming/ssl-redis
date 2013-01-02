@@ -1,4 +1,34 @@
+/*
+ * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ *   * Redistributions of source code must retain the above copyright notice,
+ *     this list of conditions and the following disclaimer.
+ *   * Redistributions in binary form must reproduce the above copyright
+ *     notice, this list of conditions and the following disclaimer in the
+ *     documentation and/or other materials provided with the distribution.
+ *   * Neither the name of Redis nor the names of its contributors may be used
+ *     to endorse or promote products derived from this software without
+ *     specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
+
 #include "redis.h"
+#include <math.h> /* isnan(), isinf() */
 
 /*-----------------------------------------------------------------------------
  * String Commands
@@ -12,41 +42,47 @@ static int checkStringLength(redisClient *c, long long size) {
     return REDIS_OK;
 }
 
-void setGenericCommand(redisClient *c, int nx, robj *key, robj *val, robj *expire) {
-    long seconds = 0; /* initialized to avoid an harmness warning */
+void setGenericCommand(redisClient *c, int nx, robj *key, robj *val, robj *expire, int unit) {
+    long long milliseconds = 0; /* initialized to avoid an harmness warning */
 
     if (expire) {
-        if (getLongFromObjectOrReply(c, expire, &seconds, NULL) != REDIS_OK)
+        if (getLongLongFromObjectOrReply(c, expire, &milliseconds, NULL) != REDIS_OK)
             return;
-        if (seconds <= 0) {
+        if (milliseconds <= 0) {
             addReplyError(c,"invalid expire time in SETEX");
             return;
         }
+        if (unit == UNIT_SECONDS) milliseconds *= 1000;
     }
 
-    if (lookupKeyWrite(c->db,key) != NULL && nx) {
+    if (nx && lookupKeyWrite(c->db,key) != NULL) {
         addReply(c,shared.czero);
         return;
     }
     setKey(c->db,key,val);
     server.dirty++;
-    if (expire) setExpire(c->db,key,time(NULL)+seconds);
+    if (expire) setExpire(c->db,key,mstime()+milliseconds);
     addReply(c, nx ? shared.cone : shared.ok);
 }
 
 void setCommand(redisClient *c) {
     c->argv[2] = tryObjectEncoding(c->argv[2]);
-    setGenericCommand(c,0,c->argv[1],c->argv[2],NULL);
+    setGenericCommand(c,0,c->argv[1],c->argv[2],NULL,0);
 }
 
 void setnxCommand(redisClient *c) {
     c->argv[2] = tryObjectEncoding(c->argv[2]);
-    setGenericCommand(c,1,c->argv[1],c->argv[2],NULL);
+    setGenericCommand(c,1,c->argv[1],c->argv[2],NULL,0);
 }
 
 void setexCommand(redisClient *c) {
     c->argv[3] = tryObjectEncoding(c->argv[3]);
-    setGenericCommand(c,0,c->argv[1],c->argv[3],c->argv[2]);
+    setGenericCommand(c,0,c->argv[1],c->argv[3],c->argv[2],UNIT_SECONDS);
+}
+
+void psetexCommand(redisClient *c) {
+    c->argv[3] = tryObjectEncoding(c->argv[3]);
+    setGenericCommand(c,0,c->argv[1],c->argv[3],c->argv[2],UNIT_MILLISECONDS);
 }
 
 int getGenericCommand(redisClient *c) {
@@ -73,104 +109,6 @@ void getsetCommand(redisClient *c) {
     c->argv[2] = tryObjectEncoding(c->argv[2]);
     setKey(c->db,c->argv[1],c->argv[2]);
     server.dirty++;
-}
-
-static int getBitOffsetFromArgument(redisClient *c, robj *o, size_t *offset) {
-    long long loffset;
-    char *err = "bit offset is not an integer or out of range";
-
-    if (getLongLongFromObjectOrReply(c,o,&loffset,err) != REDIS_OK)
-        return REDIS_ERR;
-
-    /* Limit offset to 512MB in bytes */
-    if ((loffset < 0) || ((unsigned long long)loffset >> 3) >= (512*1024*1024))
-    {
-        addReplyError(c,err);
-        return REDIS_ERR;
-    }
-
-    *offset = (size_t)loffset;
-    return REDIS_OK;
-}
-
-void setbitCommand(redisClient *c) {
-    robj *o;
-    char *err = "bit is not an integer or out of range";
-    size_t bitoffset;
-    int byte, bit;
-    int byteval, bitval;
-    long on;
-
-    if (getBitOffsetFromArgument(c,c->argv[2],&bitoffset) != REDIS_OK)
-        return;
-
-    if (getLongFromObjectOrReply(c,c->argv[3],&on,err) != REDIS_OK)
-        return;
-
-    /* Bits can only be set or cleared... */
-    if (on & ~1) {
-        addReplyError(c,err);
-        return;
-    }
-
-    o = lookupKeyWrite(c->db,c->argv[1]);
-    if (o == NULL) {
-        o = createObject(REDIS_STRING,sdsempty());
-        dbAdd(c->db,c->argv[1],o);
-    } else {
-        if (checkType(c,o,REDIS_STRING)) return;
-
-        /* Create a copy when the object is shared or encoded. */
-        if (o->refcount != 1 || o->encoding != REDIS_ENCODING_RAW) {
-            robj *decoded = getDecodedObject(o);
-            o = createStringObject(decoded->ptr, sdslen(decoded->ptr));
-            decrRefCount(decoded);
-            dbOverwrite(c->db,c->argv[1],o);
-        }
-    }
-
-    /* Grow sds value to the right length if necessary */
-    byte = bitoffset >> 3;
-    o->ptr = sdsgrowzero(o->ptr,byte+1);
-
-    /* Get current values */
-    byteval = ((char*)o->ptr)[byte];
-    bit = 7 - (bitoffset & 0x7);
-    bitval = byteval & (1 << bit);
-
-    /* Update byte with new bit value and return original value */
-    byteval &= ~(1 << bit);
-    byteval |= ((on & 0x1) << bit);
-    ((char*)o->ptr)[byte] = byteval;
-    signalModifiedKey(c->db,c->argv[1]);
-    server.dirty++;
-    addReply(c, bitval ? shared.cone : shared.czero);
-}
-
-void getbitCommand(redisClient *c) {
-    robj *o;
-    char llbuf[32];
-    size_t bitoffset;
-    size_t byte, bit;
-    size_t bitval = 0;
-
-    if (getBitOffsetFromArgument(c,c->argv[2],&bitoffset) != REDIS_OK)
-        return;
-
-    if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.czero)) == NULL ||
-        checkType(c,o,REDIS_STRING)) return;
-
-    byte = bitoffset >> 3;
-    bit = 7 - (bitoffset & 0x7);
-    if (o->encoding != REDIS_ENCODING_RAW) {
-        if (byte < (size_t)ll2string(llbuf,sizeof(llbuf),(long)o->ptr))
-            bitval = llbuf[byte] & (1 << bit);
-    } else {
-        if (byte < sdslen(o->ptr))
-            bitval = ((char*)o->ptr)[byte] & (1 << bit);
-    }
-
-    addReply(c, bitval ? shared.cone : shared.czero);
 }
 
 void setrangeCommand(redisClient *c) {
@@ -377,6 +315,39 @@ void decrbyCommand(redisClient *c) {
     incrDecrCommand(c,-incr);
 }
 
+void incrbyfloatCommand(redisClient *c) {
+    long double incr, value;
+    robj *o, *new, *aux;
+
+    o = lookupKeyWrite(c->db,c->argv[1]);
+    if (o != NULL && checkType(c,o,REDIS_STRING)) return;
+    if (getLongDoubleFromObjectOrReply(c,o,&value,NULL) != REDIS_OK ||
+        getLongDoubleFromObjectOrReply(c,c->argv[2],&incr,NULL) != REDIS_OK)
+        return;
+
+    value += incr;
+    if (isnan(value) || isinf(value)) {
+        addReplyError(c,"increment would produce NaN or Infinity");
+        return;
+    }
+    new = createStringObjectFromLongDouble(value);
+    if (o)
+        dbOverwrite(c->db,c->argv[1],new);
+    else
+        dbAdd(c->db,c->argv[1],new);
+    signalModifiedKey(c->db,c->argv[1]);
+    server.dirty++;
+    addReplyBulk(c,new);
+
+    /* Always replicate INCRBYFLOAT as a SET command with the final value
+     * in order to make sure that differences in float pricision or formatting
+     * will not create differences in replicas or after an AOF restart. */
+    aux = createStringObject("SET",3);
+    rewriteClientCommandArgument(c,0,aux);
+    decrRefCount(aux);
+    rewriteClientCommandArgument(c,2,new);
+}
+
 void appendCommand(redisClient *c) {
     size_t totlen;
     robj *o, *append;
@@ -422,4 +393,3 @@ void strlenCommand(redisClient *c) {
         checkType(c,o,REDIS_STRING)) return;
     addReplyLongLong(c,stringObjectLen(o));
 }
-

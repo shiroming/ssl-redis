@@ -50,6 +50,10 @@ start_server {
             assert_equal $result [r sort tosort BY weight_*]
         }
 
+        test "$title: SORT BY key with limit" {
+            assert_equal [lrange $result 5 9] [r sort tosort BY weight_* LIMIT 5 5]
+        }
+
         test "$title: SORT BY hash field" {
             assert_equal $result [r sort tosort BY wobj_*->weight]
         }
@@ -114,6 +118,47 @@ start_server {
         r sort zset alpha desc
     } {e d c b a}
 
+    test "SORT sorted set BY nosort should retain ordering" {
+        r del zset
+        r zadd zset 1 a
+        r zadd zset 5 b
+        r zadd zset 2 c
+        r zadd zset 10 d
+        r zadd zset 3 e
+        r multi
+        r sort zset by nosort asc
+        r sort zset by nosort desc
+        r exec
+    } {{a c e b d} {d b e c a}}
+
+    test "SORT sorted set BY nosort + LIMIT" {
+        r del zset
+        r zadd zset 1 a
+        r zadd zset 5 b
+        r zadd zset 2 c
+        r zadd zset 10 d
+        r zadd zset 3 e
+        assert_equal [r sort zset by nosort asc limit 0 1] {a}
+        assert_equal [r sort zset by nosort desc limit 0 1] {d}
+        assert_equal [r sort zset by nosort asc limit 0 2] {a c}
+        assert_equal [r sort zset by nosort desc limit 0 2] {d b}
+        assert_equal [r sort zset by nosort limit 5 10] {}
+        assert_equal [r sort zset by nosort limit -10 100] {a c e b d}
+    }
+
+    test "SORT sorted set BY nosort works as expected from scripts" {
+        r del zset
+        r zadd zset 1 a
+        r zadd zset 5 b
+        r zadd zset 2 c
+        r zadd zset 10 d
+        r zadd zset 3 e
+        r eval {
+            return {redis.call('sort','zset','by','nosort','asc'),
+                    redis.call('sort','zset','by','nosort','desc')}
+        } 0
+    } {{a c e b d} {d b e c a}}
+
     test "SORT sorted set: +inf and -inf handling" {
         r del zset
         r zadd zset -100 a
@@ -142,9 +187,56 @@ start_server {
     test "SORT with STORE does not create empty lists (github issue 224)" {
         r flushdb
         r lpush foo bar
-        r sort foo limit 10 10 store zap
+        r sort foo alpha limit 10 10 store zap
         r exists zap
     } {0}
+
+    test "SORT with STORE removes key if result is empty (github issue 227)" {
+        r flushdb
+        r lpush foo bar
+        r sort emptylist store foo
+        r exists foo
+    } {0}
+
+    test "SORT with BY <constant> and STORE should still order output" {
+        r del myset mylist
+        r sadd myset a b c d e f g h i l m n o p q r s t u v z aa aaa azz
+        r sort myset alpha by _ store mylist
+        r lrange mylist 0 -1
+    } {a aa aaa azz b c d e f g h i l m n o p q r s t u v z}
+
+    test "SORT will complain with numerical sorting and bad doubles (1)" {
+        r del myset
+        r sadd myset 1 2 3 4 not-a-double
+        set e {}
+        catch {r sort myset} e
+        set e
+    } {*ERR*double*}
+
+    test "SORT will complain with numerical sorting and bad doubles (2)" {
+        r del myset
+        r sadd myset 1 2 3 4
+        r mset score:1 10 score:2 20 score:3 30 score:4 not-a-double
+        set e {}
+        catch {r sort myset by score:*} e
+        set e
+    } {*ERR*double*}
+
+    test "SORT BY sub-sorts lexicographically if score is the same" {
+        r del myset
+        r sadd myset a b c d e f g h i l m n o p q r s t u v z aa aaa azz
+        foreach ele {a aa aaa azz b c d e f g h i l m n o p q r s t u v z} {
+            set score:$ele 100
+        }
+        r sort myset by score:*
+    } {a aa aaa azz b c d e f g h i l m n o p q r s t u v z}
+
+    test "SORT GET with pattern ending with just -> does not get hash field" {
+        r del mylist
+        r lpush mylist a
+        r set x:a-> 100
+        r sort mylist by num get x:*->
+    } {100}
 
     tags {"slow"} {
         set num 100

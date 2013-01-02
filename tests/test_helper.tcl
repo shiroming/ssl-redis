@@ -23,16 +23,25 @@ set ::all_tests {
     unit/sort
     unit/expire
     unit/other
-    unit/cas
+    unit/multi
     unit/quit
+    unit/aofrw
     integration/replication
     integration/replication-2
     integration/replication-3
+    integration/replication-4
     integration/aof
+    integration/rdb
+    integration/convert-zipmap-hash-on-load
     unit/pubsub
     unit/slowlog
+    unit/scripting
     unit/maxmemory
     unit/introspection
+    unit/limits
+    unit/obuf-limits
+    unit/dump
+    unit/bitops
 }
 # Index to the next test to run in the ::all_tests list.
 set ::next_test 0
@@ -338,6 +347,7 @@ proc print_help_screen {} {
         "--quiet            Don't show individual tests."
         "--single <unit>    Just execute the specified unit (see next option)."
         "--list-tests       List all the available test units."
+        "--clients <num>    Number of test clients (16)."
         "--force-failure    Force the execution of a test that always fails."
         "--help             Print this help screen."
     } "\n"]
@@ -382,6 +392,9 @@ for {set j 0} {$j < [llength $argv]} {incr j} {
     } elseif {$opt eq {--client}} {
         set ::client 1
         set ::test_server_port $arg
+        incr j
+    } elseif {$opt eq {--clients}} {
+        set ::numclients $arg
         incr j
     } elseif {$opt eq {--help}} {
         print_help_screen

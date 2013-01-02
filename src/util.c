@@ -1,3 +1,32 @@
+/*
+ * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ *   * Redistributions of source code must retain the above copyright notice,
+ *     this list of conditions and the following disclaimer.
+ *   * Redistributions in binary form must reproduce the above copyright
+ *     notice, this list of conditions and the following disclaimer in the
+ *     documentation and/or other materials provided with the distribution.
+ *   * Neither the name of Redis nor the names of its contributors may be used
+ *     to endorse or promote products derived from this software without
+ *     specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
+
 #include "fmacros.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -5,9 +34,9 @@
 #include <ctype.h>
 #include <limits.h>
 #include <math.h>
+#include <unistd.h>
 #include <sys/time.h>
 #include <float.h>
-#include <unistd.h>
 
 #include "util.h"
 
@@ -212,8 +241,8 @@ int ll2string(char *s, size_t len, long long value) {
 /* Convert a string into a long long. Returns 1 if the string could be parsed
  * into a (non-overflowing) long long, 0 otherwise. The value will be set to
  * the parsed value when appropriate. */
-int string2ll(char *s, size_t slen, long long *value) {
-    char *p = s;
+int string2ll(const char *s, size_t slen, long long *value) {
+    const char *p = s;
     size_t plen = 0;
     int negative = 0;
     unsigned long long v;
@@ -278,7 +307,7 @@ int string2ll(char *s, size_t slen, long long *value) {
 /* Convert a string into a long. Returns 1 if the string could be parsed into a
  * (non-overflowing) long, 0 otherwise. The value will be set to the parsed
  * value when appropriate. */
-int string2l(char *s, size_t slen, long *lval) {
+int string2l(const char *s, size_t slen, long *lval) {
     long long llval;
 
     if (!string2ll(s,slen,&llval))
@@ -374,22 +403,6 @@ void getRandomHexChars(char *p, unsigned int len) {
     for (j = 0; j < len; j++)
         p[j] = charset[p[j] & 0x0F];
     fclose(fp);
-}
-
-/* Return the UNIX time in microseconds */
-long long ustime(void) {
-    struct timeval tv;
-    long long ust;
-
-    gettimeofday(&tv, NULL);
-    ust = ((long long)tv.tv_sec)*1000000;
-    ust += tv.tv_usec;
-    return ust;
-}
-
-/* Return the UNIX time in milliseconds */
-long long mstime(void) {
-    return ustime()/1000;
 }
 
 #ifdef UTIL_TEST_MAIN

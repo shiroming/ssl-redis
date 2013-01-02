@@ -1,6 +1,6 @@
 /* anet.c -- Basic TCP socket stuff made a bit less boring
  *
- * Copyright (c) 2006-2010, Salvatore Sanfilippo <antirez at gmail dot com>
+ * Copyright (c) 2006-2012, Salvatore Sanfilippo <antirez at gmail dot com>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -383,7 +383,11 @@ static int anetListen(char *err, int s, struct sockaddr *sa, socklen_t len) {
         close(s);
         return ANET_ERR;
     }
-    if (listen(s, 511) == -1) { /* the magic 511 constant is from nginx */
+
+    /* Use a backlog of 512 entries. We pass 511 to the listen() call because
+     * the kernel does: backlogsize = roundup_pow_of_two(backlogsize + 1);
+     * which will thus give us a backlog of 512 entries */
+    if (listen(s, 511) == -1) {
         anetSetError(err, "listen: %s", strerror(errno));
         close(s);
         return ANET_ERR;
@@ -474,7 +478,27 @@ int anetPeerToString(int fd, char *ip, int *port) {
     struct sockaddr_in sa;
     socklen_t salen = sizeof(sa);
 
-    if (getpeername(fd,(struct sockaddr*)&sa,&salen) == -1) return -1;
+    if (getpeername(fd,(struct sockaddr*)&sa,&salen) == -1) {
+        *port = 0;
+        ip[0] = '?';
+        ip[1] = '\0';
+        return -1;
+    }
+    if (ip) strcpy(ip,inet_ntoa(sa.sin_addr));
+    if (port) *port = ntohs(sa.sin_port);
+    return 0;
+}
+
+int anetSockName(int fd, char *ip, int *port) {
+    struct sockaddr_in sa;
+    socklen_t salen = sizeof(sa);
+
+    if (getsockname(fd,(struct sockaddr*)&sa,&salen) == -1) {
+        *port = 0;
+        ip[0] = '?';
+        ip[1] = '\0';
+        return -1;
+    }
     if (ip) strcpy(ip,inet_ntoa(sa.sin_addr));
     if (port) *port = ntohs(sa.sin_port);
     return 0;

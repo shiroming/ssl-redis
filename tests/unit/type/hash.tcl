@@ -14,8 +14,8 @@ start_server {tags {"hash"}} {
         list [r hlen smallhash]
     } {8}
 
-    test {Is the small hash encoded with a zipmap?} {
-        assert_encoding zipmap smallhash
+    test {Is the small hash encoded with a ziplist?} {
+        assert_encoding ziplist smallhash
     }
 
     test {HSET/HLEN - Big hash creation} {
@@ -33,7 +33,7 @@ start_server {tags {"hash"}} {
         list [r hlen bighash]
     } {1024}
 
-    test {Is the big hash encoded with a zipmap?} {
+    test {Is the big hash encoded with a ziplist?} {
         assert_encoding hashtable bighash
     }
 
@@ -252,7 +252,7 @@ start_server {tags {"hash"}} {
         lappend rv [r hexists bighash nokey]
     } {1 0 1 0}
 
-    test {Is a zipmap encoded Hash promoted on big payload?} {
+    test {Is a ziplist encoded Hash promoted on big payload?} {
         r hset smallhash foo [string repeat a 1024]
         r debug object smallhash
     } {*hashtable*}
@@ -298,9 +298,19 @@ start_server {tags {"hash"}} {
         list [r hincrby smallhash tmp 17179869184] [r hincrby bighash tmp 17179869184]
     } {34359738368 34359738368}
 
-    test {HINCRBY fails against hash value with spaces} {
-        r hset smallhash str "    11    "
-        r hset bighash str "    11    "
+    test {HINCRBY fails against hash value with spaces (left)} {
+        r hset smallhash str " 11"
+        r hset bighash str " 11"
+        catch {r hincrby smallhash str 1} smallerr
+        catch {r hincrby smallhash str 1} bigerr
+        set rv {}
+        lappend rv [string match "ERR*not an integer*" $smallerr]
+        lappend rv [string match "ERR*not an integer*" $bigerr]
+    } {1 1}
+
+    test {HINCRBY fails against hash value with spaces (right)} {
+        r hset smallhash str "11 "
+        r hset bighash str "11 "
         catch {r hincrby smallhash str 1} smallerr
         catch {r hincrby smallhash str 1} bigerr
         set rv {}
@@ -316,9 +326,145 @@ start_server {tags {"hash"}} {
         set e
     } {*overflow*}
 
-    test {Hash zipmap regression test for large keys} {
+    test {HINCRBYFLOAT against non existing database key} {
+        r del htest
+        list [r hincrbyfloat htest foo 2.5]
+    } {2.5}
+
+    test {HINCRBYFLOAT against non existing hash key} {
+        set rv {}
+        r hdel smallhash tmp
+        r hdel bighash tmp
+        lappend rv [roundFloat [r hincrbyfloat smallhash tmp 2.5]]
+        lappend rv [roundFloat [r hget smallhash tmp]]
+        lappend rv [roundFloat [r hincrbyfloat bighash tmp 2.5]]
+        lappend rv [roundFloat [r hget bighash tmp]]
+    } {2.5 2.5 2.5 2.5}
+
+    test {HINCRBYFLOAT against hash key created by hincrby itself} {
+        set rv {}
+        lappend rv [roundFloat [r hincrbyfloat smallhash tmp 3.5]]
+        lappend rv [roundFloat [r hget smallhash tmp]]
+        lappend rv [roundFloat [r hincrbyfloat bighash tmp 3.5]]
+        lappend rv [roundFloat [r hget bighash tmp]]
+    } {6 6 6 6}
+
+    test {HINCRBYFLOAT against hash key originally set with HSET} {
+        r hset smallhash tmp 100
+        r hset bighash tmp 100
+        list [roundFloat [r hincrbyfloat smallhash tmp 2.5]] \
+             [roundFloat [r hincrbyfloat bighash tmp 2.5]]
+    } {102.5 102.5}
+
+    test {HINCRBYFLOAT over 32bit value} {
+        r hset smallhash tmp 17179869184
+        r hset bighash tmp 17179869184
+        list [r hincrbyfloat smallhash tmp 1] \
+             [r hincrbyfloat bighash tmp 1]
+    } {17179869185 17179869185}
+
+    test {HINCRBYFLOAT over 32bit value with over 32bit increment} {
+        r hset smallhash tmp 17179869184
+        r hset bighash tmp 17179869184
+        list [r hincrbyfloat smallhash tmp 17179869184] \
+             [r hincrbyfloat bighash tmp 17179869184]
+    } {34359738368 34359738368}
+
+    test {HINCRBYFLOAT fails against hash value with spaces (left)} {
+        r hset smallhash str " 11"
+        r hset bighash str " 11"
+        catch {r hincrbyfloat smallhash str 1} smallerr
+        catch {r hincrbyfloat smallhash str 1} bigerr
+        set rv {}
+        lappend rv [string match "ERR*not*float*" $smallerr]
+        lappend rv [string match "ERR*not*float*" $bigerr]
+    } {1 1}
+
+    test {HINCRBYFLOAT fails against hash value with spaces (right)} {
+        r hset smallhash str "11 "
+        r hset bighash str "11 "
+        catch {r hincrbyfloat smallhash str 1} smallerr
+        catch {r hincrbyfloat smallhash str 1} bigerr
+        set rv {}
+        lappend rv [string match "ERR*not*float*" $smallerr]
+        lappend rv [string match "ERR*not*float*" $bigerr]
+    } {1 1}
+
+    test {Hash ziplist regression test for large keys} {
         r hset hash kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk a
         r hset hash kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk b
         r hget hash kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk
     } {b}
+
+    foreach size {10 512} {
+        test "Hash fuzzing #1 - $size fields" {
+            for {set times 0} {$times < 10} {incr times} {
+                catch {unset hash}
+                array set hash {}
+                r del hash
+
+                # Create
+                for {set j 0} {$j < $size} {incr j} {
+                    set field [randomValue]
+                    set value [randomValue]
+                    r hset hash $field $value
+                    set hash($field) $value
+                }
+
+                # Verify
+                foreach {k v} [array get hash] {
+                    assert_equal $v [r hget hash $k]
+                }
+                assert_equal [array size hash] [r hlen hash]
+            }
+        }
+
+        test "Hash fuzzing #2 - $size fields" {
+            for {set times 0} {$times < 10} {incr times} {
+                catch {unset hash}
+                array set hash {}
+                r del hash
+
+                # Create
+                for {set j 0} {$j < $size} {incr j} {
+                    randpath {
+                        set field [randomValue]
+                        set value [randomValue]
+                        r hset hash $field $value
+                        set hash($field) $value
+                    } {
+                        set field [randomSignedInt 512]
+                        set value [randomSignedInt 512]
+                        r hset hash $field $value
+                        set hash($field) $value
+                    } {
+                        randpath {
+                            set field [randomValue]
+                        } {
+                            set field [randomSignedInt 512]
+                        }
+                        r hdel hash $field
+                        unset -nocomplain hash($field)
+                    }
+                }
+
+                # Verify
+                foreach {k v} [array get hash] {
+                    assert_equal $v [r hget hash $k]
+                }
+                assert_equal [array size hash] [r hlen hash]
+            }
+        }
+    }
+
+    test {Stress test the hash ziplist -> hashtable encoding conversion} {
+        r config set hash-max-ziplist-entries 32
+        for {set j 0} {$j < 100} {incr j} {
+            r del myhash
+            for {set i 0} {$i < 64} {incr i} {
+                r hset myhash [randomValue] [randomValue]
+            }
+            assert {[r object encoding myhash] eq {hashtable}}
+        }
+    }
 }

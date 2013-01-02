@@ -5,8 +5,12 @@ SSL communications with clients and slaves.
 
 If you want to use ssl-redis from PHP, I suggest you use my fork of nicholasfs' phpredis called ssl-phpredis
 
-Changes in this fork are copyright 2012 Triton Digital Media, and 
-released to the public domain as open source under the BSD license. 
+Changes in this fork are copyright 2012 Triton Digital Media, and
+released to the public domain as open source under the BSD license.
+
+Some portions are copyright 2012-2013 Brad Broerman, and released to the public domain
+under the BSD license.
+
 All other portions of this codebase remain copyright Salvatore Sanfilippo and
 other contributors, as listed in the code.
 

@@ -51,6 +51,9 @@
 
 /* Defined in hiredis.c */
 void __redisSetError(redisContext *c, int type, const char *str);
+int compareTimeval( struct timeval a, struct timeval b );
+struct timeval subtractTimeval( struct timeval a, struct timeval b);
+
 
 static void __redisSetErrorFromErrno(redisContext *c, int type, const char *prefix) {
     char buf[128];
@@ -249,6 +252,9 @@ end:
 }
 
 int redisContextConnectSSL(redisContext *c, const char *addr, int port, char* certfile, char* certdir, struct timeval *timeout) {
+  struct timeval  start_time;
+  int             has_timeout = 0;
+  int             is_nonblocking = 0;
 
   c->ssl.sd = -1;
   c->ssl.ctx = NULL;
@@ -295,24 +301,136 @@ int redisContextConnectSSL(redisContext *c, const char *addr, int port, char* ce
 
   SSL_CTX_load_verify_locations(ctx, certfile, certdir);
 
-  // Same as before, try to connect.
-  if (BIO_do_connect(bio) <= 0) {
-    char errorbuf[1024];
-     __redisSetError(c,REDIS_ERR_OTHER,"SSL Error: Failed to connect");
-     ERR_error_string(1024,errorbuf);
-     __redisSetError(c,REDIS_ERR_OTHER,errorbuf);
-     cleanupSSL( &(c->ssl) );
-     return REDIS_ERR;
+  // Are we supposed to be blocking or non-blocking?
+  if( c->flags & REDIS_BLOCK == 0) {
+	  is_nonblocking = 1;
+	  BIO_set_nbio(bio,1);
+  }
+
+  // What about a timeout?
+  // If we're blocking and have a timeout, we need to handle that specially
+  if( NULL != timeout ) {
+	BIO_set_nbio(bio,1);
+	has_timeout = 1;
+	gettimeofday(&start_time, NULL);
+  }
+
+  while(1) {
+    struct timeval	cur_time,
+		            elapsed_time;
+
+	if (has_timeout) {
+	  gettimeofday(&cur_time, NULL);
+      elapsed_time = subtractTimeval( cur_time, start_time );
+
+  	  if (compareTimeval( elapsed_time, *timeout) > 0) {
+  	    char errorbuf[1024];
+
+  	    __redisSetError(c,REDIS_ERR_OTHER,"SSL Error: Connection timed out.");
+  	    ERR_error_string(1024,errorbuf);
+  	    __redisSetError(c,REDIS_ERR_OTHER,errorbuf);
+  	    cleanupSSL( &(c->ssl) );
+  	    return REDIS_ERR;
+  	  }
+	}
+
+    // Same as before, try to connect.
+    if (BIO_do_connect(bio) <= 0 ) {
+      if( BIO_should_retry( bio ) ) {
+    	  // We need to retry.
+      } else {
+        char errorbuf[1024];
+        __redisSetError(c,REDIS_ERR_OTHER,"SSL Error: Failed to connect");
+        ERR_error_string(1024,errorbuf);
+        __redisSetError(c,REDIS_ERR_OTHER,errorbuf);
+        cleanupSSL( &(c->ssl) );
+        return REDIS_ERR;
+      }
+    } else {
+      // connect is done...
+      break;
+    }
+
+    if( has_timeout ) {
+    	// Do select and seelct on it
+    	int result;
+    	int fd = BIO_get_fd( bio, NULL );
+    	struct timeval time_left;
+
+    	if (has_timeout) {
+    	  time_left = subtractTimeval( *timeout, elapsed_time );
+    	}
+
+    	fd_set readset, writeset;
+        FD_ZERO(&readset);
+    	FD_SET(fd, &readset);
+        FD_ZERO(&writeset);
+    	FD_SET(fd, &writeset);
+
+    	do {
+    	  result = select( fd+1, &readset, &writeset, NULL, &time_left);
+    	} while( result == -1 && errno == EINTR );
+    }
+
   }
   
-  // Now we need to do the SSL handshake, so we can communicate.
-  if (BIO_do_handshake(bio) <= 0) {
-    char errorbuf[1024];
-    __redisSetError(c,REDIS_ERR_OTHER,"SSL Error: handshake failure");
-    ERR_error_string(1024,errorbuf);
-    __redisSetError(c,REDIS_ERR_OTHER,errorbuf);
-    cleanupSSL( &(c->ssl) );
-    return REDIS_ERR;
+  while(1) {
+    struct timeval	cur_time,
+		            elapsed_time;
+
+	if (has_timeout) {
+	  gettimeofday(&cur_time, NULL);
+      elapsed_time = subtractTimeval( cur_time, start_time );
+
+  	  if (compareTimeval( elapsed_time, *timeout) > 0) {
+  	    char errorbuf[1024];
+
+  	    __redisSetError(c,REDIS_ERR_OTHER,"SSL Error: Connection timed out.");
+  	    ERR_error_string(1024,errorbuf);
+  	    __redisSetError(c,REDIS_ERR_OTHER,errorbuf);
+  	    cleanupSSL( &(c->ssl) );
+  	    return REDIS_ERR;
+  	  }
+	}
+
+    // Now we need to do the SSL handshake, so we can communicate.
+    if (BIO_do_handshake(bio) <= 0) {
+        if( BIO_should_retry( bio ) ) {
+      	  // We need to retry.
+        } else {
+          char errorbuf[1024];
+          __redisSetError(c,REDIS_ERR_OTHER,"SSL Error: handshake failure");
+          ERR_error_string(1024,errorbuf);
+          __redisSetError(c,REDIS_ERR_OTHER,errorbuf);
+          cleanupSSL( &(c->ssl) );
+          return REDIS_ERR;
+        }
+    } else {
+    	// handshake is done...
+    	break;
+    }
+
+    if( has_timeout ) {
+    	// Do select and seelct on it
+    	int result;
+    	int fd = BIO_get_fd( bio, NULL );
+    	struct timeval time_left;
+
+    	if (has_timeout) {
+    	  time_left = subtractTimeval( *timeout, elapsed_time );
+    	}
+
+    	fd_set readset, writeset;
+        FD_ZERO(&readset);
+    	FD_SET(fd, &readset);
+        FD_ZERO(&writeset);
+    	FD_SET(fd, &writeset);
+
+    	do {
+    	  result = select( fd+1, &readset, &writeset, NULL, &time_left);
+    	} while( result == -1 && errno == EINTR );
+    }
+
   }
 
   long verify_result = SSL_get_verify_result(ssl);
@@ -322,14 +440,7 @@ int redisContextConnectSSL(redisContext *c, const char *addr, int port, char* ce
     char commonName [512];
     X509_NAME * name = X509_get_subject_name(peerCertificate);
     X509_NAME_get_text_by_NID(name, NID_commonName, commonName, 512);
-
-    if(strcasecmp(commonName, "BradBroerman") != 0) {
-      __redisSetError(c,REDIS_ERR_OTHER,"SSL Error: Error validating cert common name.\n\n" );
-      cleanupSSL( &(c->ssl) );
-      return REDIS_ERR;
-    }
-  }
-  else {
+  } else {
      char errorbuf[1024];
      __redisSetError(c,REDIS_ERR_OTHER,"SSL Error: Error retrieving peer certificate.\n" );
      ERR_error_string(1024,errorbuf);
@@ -337,6 +448,8 @@ int redisContextConnectSSL(redisContext *c, const char *addr, int port, char* ce
      cleanupSSL( &(c->ssl) );
      return REDIS_ERR;
   }
+
+  BIO_set_nbio(bio,is_nonblocking);
 
   return REDIS_OK;
 }
@@ -398,4 +511,30 @@ int redisContextConnectUnix(redisContext *c, const char *path, struct timeval *t
     c->fd = s;
     c->flags |= REDIS_CONNECTED;
     return REDIS_OK;
+}
+
+struct timeval subtractTimeval( struct timeval a, struct timeval b )
+{
+  struct timeval difference;
+
+  difference.tv_sec = a.tv_sec - b.tv_sec;
+  difference.tv_usec = a.tv_usec - b.tv_usec;
+
+  if (a.tv_usec < b.tv_usec) {
+    b.tv_sec -= 1L;
+    b.tv_usec += 1000000L;
+  }
+
+  return difference;
+}
+
+int compareTimeval( struct timeval a, struct timeval b )
+{
+  if (a.tv_sec > b.tv_sec || (a.tv_sec == b.tv_sec && a.tv_usec > b.tv_usec) ) {
+    return 1;
+  } else if( a.tv_sec == b.tv_sec && a.tv_usec == b.tv_usec ) {
+    return 0;
+  } 
+  
+  return -1;
 }

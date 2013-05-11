@@ -1015,7 +1015,7 @@ void redisFree(redisContext *c) {
 /* Connect to a Redis instance. On error the field error in the returned
  * context will be set to the return value of the error function.
  * When no set of reply functions is given, the default set will be used. */
-redisContext *redisConnect(const char *ip, int port, int ssl, char* certfile, char* certdir ) {
+redisContext *redisConnect(const char *ip, int port, int ssl, char* certfile, char* certdir) {
     redisContext *c = redisContextInit();
     c->flags |= REDIS_BLOCK;
 
@@ -1029,17 +1029,29 @@ redisContext *redisConnect(const char *ip, int port, int ssl, char* certfile, ch
     return c;
 }
 
-redisContext *redisConnectWithTimeout(const char *ip, int port, struct timeval tv) {
+redisContext *redisConnectWithTimeout(const char *ip, int port, struct timeval tv, int ssl, char* certfile, char* certdir) {
     redisContext *c = redisContextInit();
     c->flags |= REDIS_BLOCK;
-    redisContextConnectTcp(c,ip,port,&tv);
+
+    if( ssl ) {
+       setupSSL();
+       redisContextConnectSSL(c,ip,port,certfile,certdir,&tv);
+     } else {
+       redisContextConnectTcp(c,ip,port,&tv);
+     }
+
     return c;
 }
 
-redisContext *redisConnectNonBlock(const char *ip, int port) {
+redisContext *redisConnectNonBlock(const char *ip, int port, int ssl, char* certfile, char* certdir) {
     redisContext *c = redisContextInit();
     c->flags &= ~REDIS_BLOCK;
-    redisContextConnectTcp(c,ip,port,NULL);
+    if( ssl ) {
+      setupSSL();
+      redisContextConnectSSL(c,ip,port,certfile,certdir,NULL);
+    } else {
+      redisContextConnectTcp(c,ip,port,NULL);
+    }
     return c;
 }
 

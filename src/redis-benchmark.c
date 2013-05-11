@@ -251,7 +251,7 @@ static client createClient(char *cmd, size_t len) {
     client c = zmalloc(sizeof(struct _client));
 
     if (config.hostsocket == NULL) {
-        c->context = redisConnectNonBlock(config.hostip,config.hostport);
+        c->context = redisConnectNonBlock(config.hostip,config.hostport,0,NULL,NULL);
     } else {
         c->context = redisConnectUnixNonBlock(config.hostsocket);
     }

@@ -183,9 +183,9 @@ typedef struct redisContext {
     redisReader *reader; /* Protocol reader */
 } redisContext;
 
-redisContext *redisConnect(const char *ip, int port, int ssl, char* certfile, char* certDir );
-redisContext *redisConnectWithTimeout(const char *ip, int port, struct timeval tv);
-redisContext *redisConnectNonBlock(const char *ip, int port);
+redisContext *redisConnect(const char *ip, int port, int ssl, char* certfile, char* certdir);
+redisContext *redisConnectWithTimeout(const char *ip, int port, struct timeval tv, int ssl, char* certfile, char* certdir);
+redisContext *redisConnectNonBlock(const char *ip, int port, int ssl, char* certfile, char* certdir);
 redisContext *redisConnectUnix(const char *path);
 redisContext *redisConnectUnixWithTimeout(const char *path, struct timeval tv);
 redisContext *redisConnectUnixNonBlock(const char *path);
@@ -193,6 +193,7 @@ int redisSetTimeout(redisContext *c, struct timeval tv);
 void redisFree(redisContext *c);
 int redisBufferRead(redisContext *c);
 int redisBufferWrite(redisContext *c, int *done);
+
 
 /* In a blocking context, this function first checks if there are unconsumed
  * replies to return and returns one if so. Otherwise, it flushes the output

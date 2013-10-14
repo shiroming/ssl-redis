@@ -574,6 +574,7 @@ redisReader *redisReaderCreate(void) {
     return r;
 }
 
+
 void redisReaderFree(redisReader *r) {
     if (r->reply != NULL && r->fn && r->fn->freeObject)
         r->fn->freeObject(r->reply);
@@ -825,6 +826,7 @@ int redisvFormatCommand(char **target, const char *format, va_list ap) {
                             goto fmt_valid;
                         }
                         goto fmt_invalid;
+
                     }
 
                 fmt_invalid:
@@ -1028,17 +1030,32 @@ redisContext *redisConnect(const char *ip, int port, int ssl, char* certfile, ch
     return c;
 }
 
-redisContext *redisConnectWithTimeout(const char *ip, int port, struct timeval tv) {
+redisContext *redisConnectWithTimeout(const char *ip, int port, struct timeval tv, int ssl, char* certfile, char* certdir) {
     redisContext *c = redisContextInit();
     c->flags |= REDIS_BLOCK;
-    redisContextConnectTcp(c,ip,port,&tv);
+
+    if( ssl ) {
+      setupSSL();
+      redisContextConnectSSL(c,ip,port,certfile,certdir,&tv);
+    } else {
+      redisContextConnectTcp(c,ip,port,&tv);
+    }
+
     return c;
 }
 
-redisContext *redisConnectNonBlock(const char *ip, int port) {
+redisContext *redisConnectNonBlock(const char *ip, int port, int ssl, char* certfile, char* certdir) {
+
     redisContext *c = redisContextInit();
     c->flags &= ~REDIS_BLOCK;
-    redisContextConnectTcp(c,ip,port,NULL);
+
+    if( ssl ) {
+      setupSSL();
+      redisContextConnectSSL(c,ip,port,certfile,certdir,NULL);
+    } else {
+      redisContextConnectTcp(c,ip,port,NULL);
+    }
+
     return c;
 }
 

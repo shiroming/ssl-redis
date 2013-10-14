@@ -50,6 +50,9 @@
 static struct config {
     aeEventLoop *el;
     const char *hostip;
+    int ssl;
+    char *certfile;
+    char *certdir;
     int hostport;
     const char *hostsocket;
     int numclients;
@@ -251,7 +254,7 @@ static client createClient(char *cmd, size_t len) {
     client c = zmalloc(sizeof(struct _client));
 
     if (config.hostsocket == NULL) {
-        c->context = redisConnectNonBlock(config.hostip,config.hostport);
+        c->context = redisConnectNonBlock(config.hostip,config.hostport,config.ssl, config.certfile, config.certdir);
     } else {
         c->context = redisConnectUnixNonBlock(config.hostsocket);
     }
@@ -378,6 +381,14 @@ int parseOptions(int argc, const char **argv) {
         } else if (!strcmp(argv[i],"-p")) {
             if (lastarg) goto invalid;
             config.hostport = atoi(argv[++i]);
+        } else if (!strcmp(argv[i],"-ssl") ) {
+            config.ssl = 1;
+        } else if (!strcmp(argv[i],"-cafile") && !lastarg) {
+            sdsfree(config.certfile);
+            config.certfile = sdsnew(argv[++i]);
+        } else if (!strcmp(argv[i],"-cadir") && !lastarg) {
+            sdsfree(config.certdir);
+            config.certdir = sdsnew(argv[++i]);            
         } else if (!strcmp(argv[i],"-s")) {
             if (lastarg) goto invalid;
             config.hostsocket = strdup(argv[++i]);

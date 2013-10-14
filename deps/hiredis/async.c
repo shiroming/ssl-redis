@@ -141,8 +141,8 @@ static void __redisAsyncCopyError(redisAsyncContext *ac) {
     ac->errstr = c->errstr;
 }
 
-redisAsyncContext *redisAsyncConnect(const char *ip, int port) {
-    redisContext *c = redisConnectNonBlock(ip,port);
+redisAsyncContext *redisAsyncConnect(const char *ip, int port, int ssl, char* certfile, char* certdir ) {
+    redisContext *c = redisConnectNonBlock(ip,port,ssl,certfile,certdir);
     redisAsyncContext *ac = redisAsyncInitialize(c);
     __redisAsyncCopyError(ac);
     return ac;

@@ -1310,7 +1310,7 @@ void sentinelReconnectInstance(sentinelRedisInstance *ri) {
     /* Commands connection. */
     if (ri->cc == NULL) {
         // TODO: Need to add SSL connect here if configured in the sentinelRedisInstance config objet.
-        ri->cc = redisAsyncConnect(ri->addr->ip,ri->addr->port, 0, NULL, NULL);
+        ri->cc = redisAsyncConnect(ri->addr->ip,ri->addr->port, server.ssl, server.ssl_root_file, NULL);
         if (ri->cc->err) {
             sentinelEvent(REDIS_DEBUG,"-cmd-link-reconnection",ri,"%@ #%s",
                 ri->cc->errstr);
@@ -1329,7 +1329,7 @@ void sentinelReconnectInstance(sentinelRedisInstance *ri) {
     /* Pub / Sub */
     if ((ri->flags & SRI_MASTER) && ri->pc == NULL) {
     // TODO: Need to add SSL connect here if configured in the sentinelRedisInstance config objet.
-        ri->pc = redisAsyncConnect(ri->addr->ip,ri->addr->port, 0, NULL, NULL);
+        ri->pc = redisAsyncConnect(ri->addr->ip,ri->addr->port, server.ssl, server.ssl_root_file, NULL);
         if (ri->pc->err) {
             sentinelEvent(REDIS_DEBUG,"-pubsub-link-reconnection",ri,"%@ #%s",
                 ri->pc->errstr);

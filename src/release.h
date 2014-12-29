@@ -1,2 +1,0 @@
-#define REDIS_GIT_SHA1 "a817b80a"
-#define REDIS_GIT_DIRTY "892"

@@ -397,7 +397,7 @@ int anetSSLGenericConnect( char* err, char* addr, int port, int flags, anetSSLCo
   } else {
      char errorbuf[1024];
      ERR_error_string(1024,errorbuf);
-     anetSetError(err, "SSL Error: Error retrieving peer certificate: %s\n", errorbuf);
+     anetSetError(err, "SSL Error: Error retrieving peer certificate (%ld): %s\n", verify_result, errorbuf);
      anetCleanupSSL( sslctn );
      return ANET_ERR;
   }

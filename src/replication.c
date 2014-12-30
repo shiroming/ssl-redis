@@ -38,7 +38,7 @@
 #include <sys/stat.h>
 
 void replicationDiscardCachedMaster(void);
-void replicationResurrectCachedMaster(int newfd);
+void replicationResurrectCachedMaster(int newfd, anetSSLConnection* sslctn);
 
 /* ---------------------------------- MASTER -------------------------------- */
 
@@ -379,10 +379,29 @@ int masterTryPartialResynchronization(redisClient *c) {
      * new commands at this stage. But we are sure the socket send buffer is
      * emtpy so this write will never fail actually. */
     buflen = snprintf(buf,sizeof(buf),"+CONTINUE\r\n");
+
+    if( c->ssl.ssl ) {
+    	ssize_t nwritten = SSL_write(c->ssl.ssl,buf,buflen);
+        if( nwritten != buflen ) {
+        	int errorCode = SSL_get_error( c->ssl.ssl, nwritten );
+            if( SSL_ERROR_WANT_READ == errorCode || SSL_ERROR_WANT_WRITE == errorCode) {
+            	freeClientAsync(c);
+                return REDIS_OK;
+            } else {
+                 char error[65535];
+                 ERR_error_string_n(ERR_get_error(), error, 65535);
+                 redisLog( REDIS_WARNING, "replication.c 419: SSL ERROR: %s", error);
+                 freeClientAsync(c);
+                 return REDIS_OK;
+            }
+        }
+    } else {
     if (write(c->fd,buf,buflen) != buflen) {
         freeClientAsync(c);
         return REDIS_OK;
     }
+    }
+
     psync_len = addReplyReplicationBacklog(c,psync_offset);
     redisLog(REDIS_NOTICE,
         "Partial resynchronization request accepted. Sending %lld bytes of backlog starting from offset %lld.", psync_len, psync_offset);
@@ -402,10 +421,29 @@ need_full_resync:
     /* Again, we can't use the connection buffers (see above). */
     buflen = snprintf(buf,sizeof(buf),"+FULLRESYNC %s %lld\r\n",
                       server.runid,psync_offset);
+
+    if( c->ssl.ssl ) {
+    	ssize_t nwritten = SSL_write(c->ssl.ssl,buf,buflen);
+        if( nwritten != buflen ) {
+        	int errorCode = SSL_get_error( c->ssl.ssl, nwritten );
+            if( SSL_ERROR_WANT_READ == errorCode || SSL_ERROR_WANT_WRITE == errorCode) {
+            	freeClientAsync(c);
+                return REDIS_OK;
+            } else {
+                 char error[65535];
+                 ERR_error_string_n(ERR_get_error(), error, 65535);
+                 redisLog( REDIS_WARNING, "replication.c 463: SSL ERROR: %s", error);
+                 freeClientAsync(c);
+                 return REDIS_OK;
+            }
+        }
+    } else {
     if (write(c->fd,buf,buflen) != buflen) {
         freeClientAsync(c);
         return REDIS_OK;
     }
+    }
+
     return REDIS_ERR;
 }
 
@@ -622,30 +660,29 @@ void sendBulkToSlave(aeEventLoop *el, int fd, void *privdata, int mask) {
     }
 
     nwritten = 0;
-    if( slave->ssl.ssl ) {
-      nwritten = SSL_write(slave->ssl.ssl,buf,buflen);
-      if( nwritten < 0 ) {
-        int errorCode = SSL_get_error( slave->ssl.ssl, nwritten );
-        if( SSL_ERROR_WANT_READ == errorCode || SSL_ERROR_WANT_WRITE == errorCode) {
-          nwritten = 0;
-        } else {
-          char error[65535];
-          ERR_error_string_n(ERR_get_error(), error, 65535);
-          redisLog( REDIS_WARNING, "SSL ERROR: %s", error);
-        }
-      }
+    if( slave->ssl.ssl != NULL ) {
+    	nwritten = SSL_write(slave->ssl.ssl,buf,buflen);
+    	if( nwritten < 0 ) {
+    		int errorCode = SSL_get_error( slave->ssl.ssl, nwritten );
+    		if( SSL_ERROR_WANT_READ == errorCode || SSL_ERROR_WANT_WRITE == errorCode) {
+            	redisLog( REDIS_WARNING, "replication.c 774 errorCode = %d", errorCode);
+    			nwritten = 0;
+    		} else {
+    			char error[65535];
+    			ERR_error_string_n(ERR_get_error(), error, 65535);
+            	redisLog( REDIS_WARNING, "replication.c 777 SSL ERROR: %s", error);
+            	return;
+    		}
+    	}
     } else {
-      nwritten = write(fd,buf,buflen);
-      if( nwritten == -1 ){
-       if (errno != EAGAIN) {
-            redisLog(REDIS_WARNING,"Write error sending DB to slave: %s",
-	    strerror(errno));
-      }
-    }
-
-    if(nwritten == -1) {
-        freeClient(slave);
-        return;
+    	nwritten = write(fd,buf,buflen);
+    	if( nwritten == -1 ){
+    		if (errno != EAGAIN) {
+    			redisLog(REDIS_WARNING,"Write error sending DB to slave: %s",
+    					strerror(errno));
+    		}
+            return;
+    	}
     }
 
     slave->repldboff += nwritten;
@@ -756,10 +793,25 @@ void replicationSendNewlineToMaster(void) {
     static time_t newline_sent;
     if (time(NULL) != newline_sent) {
         newline_sent = time(NULL);
+
+        if( server.repl_transfer_ssl.ssl != NULL ) {
+        	ssize_t nwritten = SSL_write(server.repl_transfer_ssl.ssl,"\n",1);
+            if( nwritten != 1 ) {
+            	int errorCode = SSL_get_error( server.repl_transfer_ssl.ssl, nwritten );
+                if( SSL_ERROR_WANT_READ == errorCode || SSL_ERROR_WANT_WRITE == errorCode) {
+                    // do nothing...
+                } else {
+                     char error[65535];
+                     ERR_error_string_n(ERR_get_error(), error, 65535);
+                     redisLog( REDIS_WARNING, "replication.c 934: SSL ERROR: %s", error);
+                }
+            }
+        } else {
         if (write(server.repl_transfer_s,"\n",1) == -1) {
             /* Pinging back in this stage is best-effort. */
         }
     }
+}
 }
 
 /* Callback used by emptyDb() while flushing away old data to load
@@ -895,7 +947,7 @@ void readSyncBulkPayload(aeEventLoop *el, int fd, void *privdata, int mask) {
         zfree(server.repl_transfer_tmpfile);
         close(server.repl_transfer_fd);
         server.master = createClient(server.repl_transfer_s);
-        if( server.repl_transfer_ssl.ssl ) {
+        if( server.repl_transfer_ssl.ssl != NULL) {
           server.master->ssl = server.repl_transfer_ssl;
         }
         server.master->flags |= REDIS_MASTER;
@@ -1001,7 +1053,7 @@ char *sendSynchronousCommand(int fd, SSL* ssl, ...) {
 #define PSYNC_CONTINUE 0
 #define PSYNC_FULLRESYNC 1
 #define PSYNC_NOT_SUPPORTED 2
-int slaveTryPartialResynchronization(int fd) {
+int slaveTryPartialResynchronization(int fd, anetSSLConnection* sslctn) {
     char *psync_runid;
     char psync_offset[32];
     sds reply;
@@ -1024,7 +1076,7 @@ int slaveTryPartialResynchronization(int fd) {
     }
 
     /* Issue the PSYNC command */
-    reply = sendSynchronousCommand(fd,"PSYNC",psync_runid,psync_offset,NULL);
+    reply = sendSynchronousCommand(fd,sslctn->ssl,"PSYNC",psync_runid,psync_offset,NULL);
 
     if (!strncmp(reply,"+FULLRESYNC",11)) {
         char *runid = NULL, *offset = NULL;
@@ -1064,7 +1116,7 @@ int slaveTryPartialResynchronization(int fd) {
         redisLog(REDIS_NOTICE,
             "Successful partial resynchronization with master.");
         sdsfree(reply);
-        replicationResurrectCachedMaster(fd);
+        replicationResurrectCachedMaster(fd,sslctn);
         return PSYNC_CONTINUE;
     }
 
@@ -1195,7 +1247,7 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
      * to start a full resynchronization so that we get the master run id
      * and the global offset, to try a partial resync at the next
      * reconnection attempt. */
-    psync_result = slaveTryPartialResynchronization(fd);
+    psync_result = slaveTryPartialResynchronization(fd,&server.repl_transfer_ssl);
     if (psync_result == PSYNC_CONTINUE) {
         redisLog(REDIS_NOTICE, "MASTER <-> SLAVE sync: Master accepted a Partial Resynchronization.");
         return;
@@ -1207,7 +1259,7 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
      * already populated. */
     if (psync_result == PSYNC_NOT_SUPPORTED) {
         redisLog(REDIS_NOTICE,"Retrying with SYNC...");
-        if (syncWrite(fd,server.repl_transfer_ssl.ssl,"SYNC\r\n",6,server.repl_syncio_timeout*1000) == -1) 
+        if (syncWrite(fd,server.repl_transfer_ssl.ssl,"SYNC\r\n",6,server.repl_syncio_timeout*1000) == -1) {
             redisLog(REDIS_WARNING,"I/O error writing to MASTER: %s",
                 strerror(errno));
             goto error;
@@ -1458,6 +1510,10 @@ void replicationCacheMaster(redisClient *c) {
     aeDeleteFileEvent(server.el,c->fd,AE_WRITABLE);
     close(c->fd);
 
+
+    //TODO: CLean this socket up
+    anetCleanupSSL( &c->ssl );
+
     /* Set fd to -1 so that we can safely call freeClient(c) later. */
     c->fd = -1;
 
@@ -1484,10 +1540,14 @@ void replicationDiscardCachedMaster(void) {
  * This funciton is called when successfully setup a partial resynchronization
  * so the stream of data that we'll receive will start from were this
  * master left. */
-void replicationResurrectCachedMaster(int newfd) {
+void replicationResurrectCachedMaster(int newfd, anetSSLConnection* sslctn) {
     server.master = server.cached_master;
     server.cached_master = NULL;
     server.master->fd = newfd;
+    server.master->ssl.ssl = sslctn->ssl;
+    server.master->ssl.ctx = sslctn->ctx;
+    server.master->ssl.bio = sslctn->bio;
+    server.master->ssl.sd = sslctn->sd;
     server.master->flags &= ~(REDIS_CLOSE_AFTER_REPLY|REDIS_CLOSE_ASAP);
     server.master->authenticated = 1;
     server.master->lastinteraction = server.unixtime;
@@ -1496,7 +1556,7 @@ void replicationResurrectCachedMaster(int newfd) {
     /* Re-add to the list of clients. */
     listAddNodeTail(server.clients,server.master);
     if (aeCreateFileEvent(server.el, newfd, AE_READABLE,
-                          readQueryFromClient, server.master)) {
+                          readQueryFromClient, server.master,0)) {
         redisLog(REDIS_WARNING,"Error resurrecting the cached master, impossible to add the readable handler: %s", strerror(errno));
         freeClientAsync(server.master); /* Close ASAP. */
     }
@@ -1505,7 +1565,7 @@ void replicationResurrectCachedMaster(int newfd) {
      * pending data in the write buffers. */
     if (server.master->bufpos || listLength(server.master->reply)) {
         if (aeCreateFileEvent(server.el, newfd, AE_WRITABLE,
-                          sendReplyToClient, server.master)) {
+                          sendReplyToClient, server.master,0)) {
             redisLog(REDIS_WARNING,"Error resurrecting the cached master, impossible to add the writable handler: %s", strerror(errno));
             freeClientAsync(server.master); /* Close ASAP. */
         }
@@ -1690,7 +1750,7 @@ void replicationCron(void) {
 
             if (slave->replstate == REDIS_REPL_WAIT_BGSAVE_START ||
                 slave->replstate == REDIS_REPL_WAIT_BGSAVE_END) {
-                if( slave->ssl.ssl ) {
+                if( slave->ssl.ssl != NULL ) {
                   SSL_write( slave->ssl.ssl,"\n", 1);
                 } else {
                   if (write(slave->fd, "\n", 1) == -1) {

@@ -39,8 +39,8 @@
 typedef char *sds;
 
 struct sdshdr {
-    int len;
-    int free;
+    unsigned int len;
+    unsigned int free;
     char buf[];
 };
 
@@ -76,6 +76,7 @@ sds sdscatprintf(sds s, const char *fmt, ...)
 sds sdscatprintf(sds s, const char *fmt, ...);
 #endif
 
+sds sdscatfmt(sds s, char const *fmt, ...);
 sds sdstrim(sds s, const char *cset);
 void sdsrange(sds s, int start, int end);
 void sdsupdatelen(sds s);

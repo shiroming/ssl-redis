@@ -154,7 +154,7 @@ void migrateCommand(redisClient *c) {
         addReplySds(c,sdsnew("+NOKEY\r\n"));
         return;
     }
-    
+
     /* Connect */
     if( server.ssl ) {
       fd = anetSSLGenericConnect(server.neterr,  c->argv[1]->ptr, atoi( c->argv[2]->ptr ), 0, &sslctn, server.ssl_root_file, server.ssl_root_dir, server.ssl_srvr_cert_common_name );
@@ -172,8 +172,8 @@ void migrateCommand(redisClient *c) {
             server.neterr);
         return;
     }
-    if ((aeWait(fd,sslctn.ssl,AE_WRITABLE,timeout*1000) & AE_WRITABLE) == 0) {
-        anetCleanupSSL( &sslctn );
+    if ((aeWait(fd, sslctn.ssl, AE_WRITABLE,timeout*1000) & AE_WRITABLE) == 0) {
+
         addReplySds(c,sdsnew("-IOERR error or timeout connecting to the client\r\n"));
         return;
     }

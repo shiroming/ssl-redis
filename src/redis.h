@@ -30,12 +30,13 @@
 #ifndef __REDIS_H
 #define __REDIS_H
 
-
 #include "anet.h"    /* Networking the easy way */
 #include "redis-server.h"
 #include "util.h"    /* Misc functions useful in many places */
+#include "latency.h" /* Latency monitor API */
+#include "sparkline.h" /* ASII graphs API */
 
-#define REDIS_HZ                100     /* Time interrupt calls/sec. */
+
 
 
 #define redisAssertWithInfo(_c,_o,_e) ((_e)?(void)0 : (_redisAssertWithInfo(_c,_o,#_e,__FILE__,__LINE__),_exit(1)))
@@ -57,6 +58,8 @@
     _var.ptr = _ptr; \
 } while(0);
 
+    uint64_t id;            /* Client incremental unique ID. */
+                            /* buffer or object being sent. */
 
 struct sharedObjectsStruct {
     robj *crlf, *ok, *err, *emptybulk, *czero, *cone, *cnegone, *pong, *space,
@@ -214,11 +217,10 @@ void freeClient(redisClient *c);
 void freeClientAsync(redisClient *c);
 void resetClient(redisClient *c);
 void sendReplyToClient(aeEventLoop *el, int fd, void *privdata, int mask);
-void addReply(redisClient *c, robj *obj);
 void *addDeferredMultiBulkLength(redisClient *c);
 void setDeferredMultiBulkLength(redisClient *c, void *node, long length);
-void addReplySds(redisClient *c, sds s);
 void processInputBuffer(redisClient *c);
+void acceptHandler(aeEventLoop *el, int fd, void *privdata, int mask);
 void acceptTcpHandler(aeEventLoop *el, int fd, void *privdata, int mask);
 void acceptUnixHandler(aeEventLoop *el, int fd, void *privdata, int mask);
 void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask);
@@ -226,7 +228,6 @@ void addReplyBulk(redisClient *c, robj *obj);
 void addReplyBulkCString(redisClient *c, char *s);
 void addReplyBulkCBuffer(redisClient *c, void *p, size_t len);
 void addReplyBulkLongLong(redisClient *c, long long ll);
-void acceptHandler(aeEventLoop *el, int fd, void *privdata, int mask);
 void addReply(redisClient *c, robj *obj);
 void addReplySds(redisClient *c, sds s);
 void addReplyError(redisClient *c, char *err);
@@ -239,18 +240,20 @@ void *dupClientReplyValue(void *o);
 void getClientsMaxBuffers(unsigned long *longest_output_list,
                           unsigned long *biggest_input_buffer);
 void formatPeerId(char *peerid, size_t peerid_len, char *ip, int port);
-int getClientPeerId(redisClient *client, char *peerid, size_t peerid_len);
-sds getClientInfoString(redisClient *client);
+char *getClientPeerId(redisClient *client);
+sds catClientInfoString(sds s, redisClient *client);
 sds getAllClientsInfoString(void);
 void rewriteClientCommandVector(redisClient *c, int argc, ...);
 void rewriteClientCommandArgument(redisClient *c, int i, robj *newval);
 unsigned long getClientOutputBufferMemoryUsage(redisClient *c);
 void freeClientsInAsyncFreeQueue(void);
 void asyncCloseClientOnOutputBufferLimitReached(redisClient *c);
-int getClientLimitClassByName(char *name);
-char *getClientLimitClassName(int class);
+int getClientType(redisClient *c);
+int getClientTypeByName(char *name);
+char *getClientTypeName(int class);
 void flushSlavesOutputBuffers(void);
 void disconnectSlaves(void);
+int processEventsWhileBlocked(void);
 
 #ifdef __GNUC__
 void addReplyErrorFormat(redisClient *c, const char *fmt, ...)
@@ -278,6 +281,7 @@ void listTypeConvert(robj *subject, int enc);
 void unblockClientWaitingData(redisClient *c);
 void handleClientsBlockedOnLists(void);
 void popGenericCommand(redisClient *c, int where);
+void signalListAsReady(redisDb *db, robj *key);
 
 /* MULTI/EXEC/WATCH... */
 void unwatchAllKeys(redisClient *c);
@@ -307,7 +311,7 @@ robj *tryObjectEncoding(robj *o);
 robj *getDecodedObject(robj *o);
 size_t stringObjectLen(robj *o);
 robj *createStringObjectFromLongLong(long long value);
-robj *createStringObjectFromLongDouble(long double value);
+robj *createStringObjectFromLongDouble(long double value, int humanfriendly);
 robj *createListObject(void);
 robj *createZiplistObject(void);
 robj *createSetObject(void);
@@ -336,7 +340,7 @@ ssize_t syncReadLine(int fd, SSL* ssl, char *ptr, ssize_t size, long long timeou
 /* Replication */
 void replicationFeedSlaves(list *slaves, int dictid, robj **argv, int argc);
 void replicationFeedMonitors(redisClient *c, list *monitors, int dictid, robj **argv, int argc);
-void updateSlavesWaitingBgsave(int bgsaveerr);
+void updateSlavesWaitingBgsave(int bgsaveerr, int type);
 void replicationCron(void);
 void replicationHandleMasterDisconnection(void);
 void replicationCacheMaster(redisClient *c);
@@ -349,6 +353,7 @@ int replicationScriptCacheExists(sds sha1);
 void replicationSetMaster(char *ip, int port);
 void replicationUnsetMaster(void);
 void replicationSendNewlineToMaster(void);
+char *replicationGetSlaveName(redisClient *c);
 
 /* Generic persistence functions */
 void startLoading(FILE *fp);
@@ -416,7 +421,7 @@ void redisLog(int level, const char *fmt, ...);
 #endif
 void redisLogRaw(int level, const char *msg);
 void redisLogFromHandler(int level, const char *msg);
-void usage();
+void usage(void);
 void updateDictResizePolicy(void);
 int htNeedsResize(dict *dict);
 void oom(const char *msg);
@@ -475,7 +480,7 @@ sds keyspaceEventsFlagsToString(int flags);
 /* Configuration */
 void loadServerConfig(char *filename, char *options);
 void appendServerSaveParams(time_t seconds, int changes);
-void resetServerSaveParams();
+void resetServerSaveParams(void);
 struct rewriteConfigState; /* Forward declaration to export API. */
 void rewriteConfigRewriteLine(struct rewriteConfigState *state, char *option, sds line, int force);
 int rewriteConfig(char *path);
@@ -534,6 +539,7 @@ uint64_t redisBuildId(void);
 void authCommand(redisClient *c);
 void pingCommand(redisClient *c);
 void echoCommand(redisClient *c);
+void commandCommand(redisClient *c);
 void setCommand(redisClient *c);
 void setnxCommand(redisClient *c);
 void setexCommand(redisClient *c);
@@ -608,6 +614,7 @@ void ttlCommand(redisClient *c);
 void pttlCommand(redisClient *c);
 void persistCommand(redisClient *c);
 void slaveofCommand(redisClient *c);
+void roleCommand(redisClient *c);
 void debugCommand(redisClient *c);
 void msetCommand(redisClient *c);
 void msetnxCommand(redisClient *c);
@@ -681,6 +688,7 @@ void pfaddCommand(redisClient *c);
 void pfcountCommand(redisClient *c);
 void pfmergeCommand(redisClient *c);
 void pfdebugCommand(redisClient *c);
+void latencyCommand(redisClient *c);
 
 #if defined(__GNUC__)
 void *calloc(size_t count, size_t size) __attribute__ ((deprecated));

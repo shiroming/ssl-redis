@@ -38,7 +38,33 @@
 #include <sys/stat.h>
 
 void replicationDiscardCachedMaster(void);
-void replicationResurrectCachedMaster(int newfd, anetSSLConnection* sslctn);
+void replicationResurrectCachedMaster(int newfd, anetSSLConnection *sslctn);
+void replicationSendAck(void);
+void putSlaveOnline(redisClient *slave);
+
+/* --------------------------- Utility functions ---------------------------- */
+
+/* Return the pointer to a string representing the slave ip:listening_port
+ * pair. Mostly useful for logging, since we want to log a slave using its
+ * IP address and it's listening port which is more clear for the user, for
+ * example: "Closing connection with slave 10.1.2.3:6380". */
+char *replicationGetSlaveName(redisClient *c) {
+    static char buf[REDIS_PEER_ID_LEN];
+    char ip[REDIS_IP_STR_LEN];
+
+    ip[0] = '\0';
+    buf[0] = '\0';
+    if (anetPeerToString(c->fd,ip,sizeof(ip),NULL) != -1) {
+        if (c->slave_listening_port)
+            snprintf(buf,sizeof(buf),"%s:%d",ip,c->slave_listening_port);
+        else
+            snprintf(buf,sizeof(buf),"%s:<unknown-slave-port>",ip);
+    } else {
+        snprintf(buf,sizeof(buf),"client id #%llu",
+            (unsigned long long) c->id);
+    }
+    return buf;
+}
 
 /* ---------------------------------- MASTER -------------------------------- */
 
@@ -81,7 +107,7 @@ void resizeReplicationBacklog(long long newsize) {
         server.repl_backlog = zmalloc(server.repl_backlog_size);
         server.repl_backlog_histlen = 0;
         server.repl_backlog_idx = 0;
-        /* Next byte we have is... the next since the buffer is emtpy. */
+        /* Next byte we have is... the next since the buffer is empty. */
         server.repl_backlog_off = server.master_repl_offset+1;
     }
 }
@@ -198,8 +224,8 @@ void replicationFeedSlaves(list *slaves, int dictid, robj **argv, int argc) {
             long objlen = stringObjectLen(argv[j]);
 
             /* We need to feed the buffer with the object as a bulk reply
-             * not just as a plain string, so create the $..CRLF payload len 
-             * ad add the final CRLF */
+             * not just as a plain string, so create the $..CRLF payload len
+             * and add the final CRLF */
             aux[0] = '$';
             len = ll2string(aux+1,sizeof(aux)-1,objlen);
             aux[len+1] = '\r';
@@ -211,7 +237,7 @@ void replicationFeedSlaves(list *slaves, int dictid, robj **argv, int argc) {
     }
 
     /* Write the command to every slave. */
-    listRewind(slaves,&li);
+    listRewind(server.slaves,&li);
     while((ln = listNext(&li))) {
         redisClient *slave = ln->value;
 
@@ -238,7 +264,6 @@ void replicationFeedMonitors(redisClient *c, list *monitors, int dictid, robj **
     int j;
     sds cmdrepr = sdsnew("+");
     robj *cmdobj;
-    char peerid[REDIS_PEER_ID_LEN];
     struct timeval tv;
 
     gettimeofday(&tv,NULL);
@@ -248,8 +273,7 @@ void replicationFeedMonitors(redisClient *c, list *monitors, int dictid, robj **
     } else if (c->flags & REDIS_UNIX_SOCKET) {
         cmdrepr = sdscatprintf(cmdrepr,"[%d unix:%s] ",dictid,server.unixsocket);
     } else {
-        getClientPeerId(c,peerid,sizeof(peerid));
-        cmdrepr = sdscatprintf(cmdrepr,"[%d %s] ",dictid,peerid);
+        cmdrepr = sdscatprintf(cmdrepr,"[%d %s] ",dictid,getClientPeerId(c));
     }
 
     for (j = 0; j < argc; j++) {
@@ -346,7 +370,8 @@ int masterTryPartialResynchronization(redisClient *c) {
                 "Runid mismatch (Client asked for '%s', I'm '%s')",
                 master_runid, server.runid);
         } else {
-            redisLog(REDIS_NOTICE,"Full resync requested by slave.");
+            redisLog(REDIS_NOTICE,"Full resync requested by slave %s",
+                replicationGetSlaveName(c));
         }
         goto need_full_resync;
     }
@@ -359,10 +384,10 @@ int masterTryPartialResynchronization(redisClient *c) {
         psync_offset > (server.repl_backlog_off + server.repl_backlog_histlen))
     {
         redisLog(REDIS_NOTICE,
-            "Unable to partial resync with the slave for lack of backlog (Slave request was: %lld).", psync_offset);
+            "Unable to partial resync with slave %s for lack of backlog (Slave request was: %lld).", replicationGetSlaveName(c), psync_offset);
         if (psync_offset > server.master_repl_offset) {
             redisLog(REDIS_WARNING,
-                "Warning: slave tried to PSYNC with an offset that is greater than the master replication offset.");
+                "Warning: slave %s tried to PSYNC with an offset that is greater than the master replication offset.", replicationGetSlaveName(c));
         }
         goto need_full_resync;
     }
@@ -374,12 +399,13 @@ int masterTryPartialResynchronization(redisClient *c) {
     c->flags |= REDIS_SLAVE;
     c->replstate = REDIS_REPL_ONLINE;
     c->repl_ack_time = server.unixtime;
+    c->repl_put_online_on_ack = 0;
     listAddNodeTail(server.slaves,c);
     /* We can't use the connection buffers since they are used to accumulate
      * new commands at this stage. But we are sure the socket send buffer is
-     * emtpy so this write will never fail actually. */
+     * empty so this write will never fail actually. */
     buflen = snprintf(buf,sizeof(buf),"+CONTINUE\r\n");
-
+    
     if( c->ssl.ssl ) {
     	ssize_t nwritten = SSL_write(c->ssl.ssl,buf,buflen);
         if( nwritten != buflen ) {
@@ -396,15 +422,16 @@ int masterTryPartialResynchronization(redisClient *c) {
             }
         }
     } else {
-    if (write(c->fd,buf,buflen) != buflen) {
-        freeClientAsync(c);
-        return REDIS_OK;
+    	if (write(c->fd,buf,buflen) != buflen) {
+    	    freeClientAsync(c);
+    	    return REDIS_OK;
+    	}
     }
-    }
-
     psync_len = addReplyReplicationBacklog(c,psync_offset);
     redisLog(REDIS_NOTICE,
-        "Partial resynchronization request accepted. Sending %lld bytes of backlog starting from offset %lld.", psync_len, psync_offset);
+        "Partial resynchronization request from %s accepted. Sending %lld bytes of backlog starting from offset %lld.",
+            replicationGetSlaveName(c),
+            psync_len, psync_offset);
     /* Note that we don't need to set the selected DB at server.slaveseldb
      * to -1 to force the master to emit SELECT, since the slave already
      * has this state from the previous connection with the master. */
@@ -421,7 +448,7 @@ need_full_resync:
     /* Again, we can't use the connection buffers (see above). */
     buflen = snprintf(buf,sizeof(buf),"+FULLRESYNC %s %lld\r\n",
                       server.runid,psync_offset);
-
+  
     if( c->ssl.ssl ) {
     	ssize_t nwritten = SSL_write(c->ssl.ssl,buf,buflen);
         if( nwritten != buflen ) {
@@ -438,16 +465,38 @@ need_full_resync:
             }
         }
     } else {
-    if (write(c->fd,buf,buflen) != buflen) {
-        freeClientAsync(c);
-        return REDIS_OK;
+    	if (write(c->fd,buf,buflen) != buflen) {
+    	    freeClientAsync(c);
+    	    return REDIS_OK;
+    	}
     }
-    }
-
+    
     return REDIS_ERR;
 }
 
-/* SYNC ad PSYNC command implemenation. */
+/* Start a BGSAVE for replication goals, which is, selecting the disk or
+ * socket target depending on the configuration, and making sure that
+ * the script cache is flushed before to start.
+ *
+ * Returns REDIS_OK on success or REDIS_ERR otherwise. */
+int startBgsaveForReplication(void) {
+    int retval;
+
+    redisLog(REDIS_NOTICE,"Starting BGSAVE for SYNC with target: %s",
+        server.repl_diskless_sync ? "slaves sockets" : "disk");
+
+    if (server.repl_diskless_sync)
+        retval = rdbSaveToSlavesSockets();
+    else
+        retval = rdbSaveBackground(server.rdb_filename);
+
+    /* Flush the script cache, since we need that slave differences are
+     * accumulated without requiring slaves to match our cached scripts. */
+    if (retval == REDIS_OK) replicationScriptCacheFlush();
+    return retval;
+}
+
+/* SYNC and PSYNC command implemenation. */
 void syncCommand(redisClient *c) {
     /* ignore SYNC if already slave or in monitor mode */
     if (c->flags & REDIS_SLAVE) return;
@@ -468,7 +517,8 @@ void syncCommand(redisClient *c) {
         return;
     }
 
-    redisLog(REDIS_NOTICE,"Slave asks for synchronization");
+    redisLog(REDIS_NOTICE,"Slave %s asks for synchronization",
+        replicationGetSlaveName(c));
 
     /* Try a partial resynchronization if this is a PSYNC command.
      * If it fails, we continue with usual full resynchronization, however
@@ -504,10 +554,12 @@ void syncCommand(redisClient *c) {
 
     /* Here we need to check if there is a background saving operation
      * in progress, or if it is required to start one */
-    if (server.rdb_child_pid != -1) {
+    if (server.rdb_child_pid != -1 &&
+        server.rdb_child_type == REDIS_RDB_CHILD_TYPE_DISK)
+    {
         /* Ok a background save is in progress. Let's check if it is a good
          * one for replication, i.e. if there is another slave that is
-         * registering differences since the server forked to save */
+         * registering differences since the server forked to save. */
         redisClient *slave;
         listNode *ln;
         listIter li;
@@ -525,21 +577,35 @@ void syncCommand(redisClient *c) {
             redisLog(REDIS_NOTICE,"Waiting for end of BGSAVE for SYNC");
         } else {
             /* No way, we need to wait for the next BGSAVE in order to
-             * register differences */
+             * register differences. */
             c->replstate = REDIS_REPL_WAIT_BGSAVE_START;
             redisLog(REDIS_NOTICE,"Waiting for next BGSAVE for SYNC");
         }
+    } else if (server.rdb_child_pid != -1 &&
+               server.rdb_child_type == REDIS_RDB_CHILD_TYPE_SOCKET)
+    {
+        /* There is an RDB child process but it is writing directly to
+         * children sockets. We need to wait for the next BGSAVE
+         * in order to synchronize. */
+        c->replstate = REDIS_REPL_WAIT_BGSAVE_START;
+        redisLog(REDIS_NOTICE,"Waiting for next BGSAVE for SYNC");
     } else {
-        /* Ok we don't have a BGSAVE in progress, let's start one */
-        redisLog(REDIS_NOTICE,"Starting BGSAVE for SYNC");
-        if (rdbSaveBackground(server.rdb_filename) != REDIS_OK) {
-            redisLog(REDIS_NOTICE,"Replication failed, can't BGSAVE");
-            addReplyError(c,"Unable to perform background save");
-            return;
+        if (server.repl_diskless_sync) {
+            /* Diskless replication RDB child is created inside
+             * replicationCron() since we want to delay its start a
+             * few seconds to wait for more slaves to arrive. */
+            c->replstate = REDIS_REPL_WAIT_BGSAVE_START;
+            if (server.repl_diskless_sync_delay)
+                redisLog(REDIS_NOTICE,"Delay next BGSAVE for SYNC");
+        } else {
+            /* Ok we don't have a BGSAVE in progress, let's start one. */
+            if (startBgsaveForReplication() != REDIS_OK) {
+                redisLog(REDIS_NOTICE,"Replication failed, can't BGSAVE");
+                addReplyError(c,"Unable to perform background save");
+                return;
+            }
+            c->replstate = REDIS_REPL_WAIT_BGSAVE_END;
         }
-        c->replstate = REDIS_REPL_WAIT_BGSAVE_END;
-        /* Flush the script cache for the new slave. */
-        replicationScriptCacheFlush();
     }
 
     if (server.repl_disable_tcp_nodelay)
@@ -596,6 +662,11 @@ void replconfCommand(redisClient *c) {
             if (offset > c->repl_ack_off)
                 c->repl_ack_off = offset;
             c->repl_ack_time = server.unixtime;
+            /* If this was a diskless replication, we need to really put
+             * the slave online when the first ACK is received (which
+             * confirms slave is online and ready to get more data). */
+            if (c->repl_put_online_on_ack && c->replstate == REDIS_REPL_ONLINE)
+                putSlaveOnline(c);
             /* Note: this command does not reply anything! */
             return;
         } else {
@@ -607,6 +678,32 @@ void replconfCommand(redisClient *c) {
     addReply(c,shared.ok);
 }
 
+/* This function puts a slave in the online state, and should be called just
+ * after a slave received the RDB file for the initial synchronization, and
+ * we are finally ready to send the incremental stream of commands.
+ *
+ * It does a few things:
+ *
+ * 1) Put the slave in ONLINE state.
+ * 2) Make sure the writable event is re-installed, since calling the SYNC
+ *    command disables it, so that we can accumulate output buffer without
+ *    sending it to the slave.
+ * 3) Update the count of good slaves. */
+void putSlaveOnline(redisClient *slave) {
+    slave->replstate = REDIS_REPL_ONLINE;
+    slave->repl_put_online_on_ack = 0;
+    slave->repl_ack_time = server.unixtime;
+    if (aeCreateFileEvent(server.el, slave->fd, AE_WRITABLE,
+        sendReplyToClient, slave) == AE_ERR) {
+        redisLog(REDIS_WARNING,"Unable to register writable event for slave bulk transfer: %s", strerror(errno));
+        freeClient(slave);
+        return;
+    }
+    refreshGoodSlavesCount();
+    redisLog(REDIS_NOTICE,"Synchronization with slave %s succeeded",
+        replicationGetSlaveName(slave));
+}
+
 void sendBulkToSlave(aeEventLoop *el, int fd, void *privdata, int mask) {
     redisClient *slave = privdata;
     REDIS_NOTUSED(el);
@@ -614,19 +711,13 @@ void sendBulkToSlave(aeEventLoop *el, int fd, void *privdata, int mask) {
     char buf[REDIS_IOBUF_LEN];
     ssize_t nwritten, buflen;
 
-    if (slave->repldboff == 0) {
-        /* Write the bulk write count before to transfer the DB. In theory here
-         * we don't know how much room there is in the output buffer of the
-         * socket, but in practice SO_SNDLOWAT (the minimum count for output
-         * operations) will never be smaller than the few bytes we need. */
-        sds bulkcount;
-
-        bulkcount = sdscatprintf(sdsempty(),"$%lld\r\n",(unsigned long long)
-            slave->repldbsize);
-
+    /* Before sending the RDB file, we send the preamble as configured by the
+     * replication process. Currently the preamble is just the bulk count of
+     * the file in the form "$<length>\r\n". */
+    if (slave->replpreamble) {
         nwritten = 0;
-        if( slave->ssl.ssl ) {
-          nwritten = SSL_write(slave->ssl.ssl,bulkcount,sdslen(bulkcount));
+        if( slave->ssl.ssl != NULL ) {
+          nwritten = SSL_write(slave->ssl.ssl,slave->replpreamble,sdslen(slave->replpreamble));
           if( nwritten < 0 ) {
             int errorCode = SSL_get_error( slave->ssl.ssl, nwritten );
             if( SSL_ERROR_WANT_READ == errorCode || SSL_ERROR_WANT_WRITE == errorCode) {
@@ -634,22 +725,31 @@ void sendBulkToSlave(aeEventLoop *el, int fd, void *privdata, int mask) {
             } else {
               char error[65535];
               ERR_error_string_n(ERR_get_error(), error, 65535);
-              redisLog( REDIS_WARNING, "SSL ERROR: %s", error);
+              redisLog( REDIS_WARNING, "replication.c 734: SSL ERROR: %s", error);
             }
           }
         } else {
-          nwritten = write(fd,bulkcount,sdslen(bulkcount));
+          nwritten = write(fd,slave->replpreamble,sdslen(slave->replpreamble));
         }
-
-        if( nwritten != (signed)sdslen(bulkcount) ) {
-          sdsfree(bulkcount);
+        if (nwritten == -1) {
+            redisLog(REDIS_VERBOSE,"Write error sending RDB preamble to slave: %s",
+                strerror(errno));
           freeClient(slave);
           return;
         }
-
-        sdsfree(bulkcount);
+   
+        server.stat_net_output_bytes += nwritten;
+        sdsrange(slave->replpreamble,nwritten,-1);
+        if (sdslen(slave->replpreamble) == 0) {
+            sdsfree(slave->replpreamble);
+            slave->replpreamble = NULL;
+            /* fall through sending data. */
+        } else {
+            return;
+        }
     }
 
+    /* If the preamble was already transfered, send the RDB bulk data. */
     lseek(slave->repldbfd,slave->repldboff,SEEK_SET);
     buflen = read(slave->repldbfd,buf,REDIS_IOBUF_LEN);
     if (buflen <= 0) {
@@ -658,58 +758,59 @@ void sendBulkToSlave(aeEventLoop *el, int fd, void *privdata, int mask) {
         freeClient(slave);
         return;
     }
-
+    
     nwritten = 0;
     if( slave->ssl.ssl != NULL ) {
-    	nwritten = SSL_write(slave->ssl.ssl,buf,buflen);
-    	if( nwritten < 0 ) {
-    		int errorCode = SSL_get_error( slave->ssl.ssl, nwritten );
-    		if( SSL_ERROR_WANT_READ == errorCode || SSL_ERROR_WANT_WRITE == errorCode) {
+        nwritten = SSL_write(slave->ssl.ssl,buf,buflen);
+        if( nwritten < 0 ) {
+            int errorCode = SSL_get_error( slave->ssl.ssl, nwritten );
+            redisLog( REDIS_WARNING, "replication.c 772 SSL NWRITTEN < 0");
+            if( SSL_ERROR_WANT_READ == errorCode || SSL_ERROR_WANT_WRITE == errorCode) {
             	redisLog( REDIS_WARNING, "replication.c 774 errorCode = %d", errorCode);
-    			nwritten = 0;
-    		} else {
-    			char error[65535];
-    			ERR_error_string_n(ERR_get_error(), error, 65535);
+            	nwritten = 0;
+            } else {
+            	char error[65535];
+            	ERR_error_string_n(ERR_get_error(), error, 65535);
             	redisLog( REDIS_WARNING, "replication.c 777 SSL ERROR: %s", error);
             	return;
-    		}
-    	}
+            }
+        }
     } else {
-    	nwritten = write(fd,buf,buflen);
-    	if( nwritten == -1 ){
-    		if (errno != EAGAIN) {
-    			redisLog(REDIS_WARNING,"Write error sending DB to slave: %s",
-    					strerror(errno));
-    		}
+        nwritten = write(fd,buf,buflen);
+        if(nwritten == -1) {
+            if (errno != EAGAIN) {
+                redisLog(REDIS_WARNING,"Write error sending DB to slave: %s",
+                strerror(errno));
+            }
             return;
-    	}
+        }
     }
 
     slave->repldboff += nwritten;
+    server.stat_net_output_bytes += nwritten;
     if (slave->repldboff == slave->repldbsize) {
         close(slave->repldbfd);
         slave->repldbfd = -1;
         aeDeleteFileEvent(server.el,slave->fd,AE_WRITABLE);
-        slave->replstate = REDIS_REPL_ONLINE;
-        slave->repl_ack_time = server.unixtime;
-        if (aeCreateFileEvent(server.el, slave->fd, AE_WRITABLE,
-            sendReplyToClient, slave, 1) == AE_ERR) {
-            redisLog(REDIS_WARNING,"Unable to register writable event for slave bulk transfer: %s", strerror(errno));
-            freeClient(slave);
-            return;
-        }
-        refreshGoodSlavesCount();
-        redisLog(REDIS_NOTICE,"Synchronization with slave succeeded");
+        putSlaveOnline(slave);
     }
 }
 
-/* This function is called at the end of every background saving.
- * The argument bgsaveerr is REDIS_OK if the background saving succeeded
- * otherwise REDIS_ERR is passed to the function.
+/* This function is called at the end of every background saving,
+ * or when the replication RDB transfer strategy is modified from
+ * disk to socket or the other way around.
  *
  * The goal of this function is to handle slaves waiting for a successful
- * background saving in order to perform non-blocking synchronization. */
-void updateSlavesWaitingBgsave(int bgsaveerr) {
+ * background saving in order to perform non-blocking synchronization, and
+ * to schedule a new BGSAVE if there are slaves that attached while a
+ * BGSAVE was in progress, but it was not a good one for replication (no
+ * other slave was accumulating differences).
+ *
+ * The argument bgsaveerr is REDIS_OK if the background saving succeeded
+ * otherwise REDIS_ERR is passed to the function.
+ * The 'type' argument is the type of the child that terminated
+ * (if it had a disk or socket target). */
+void updateSlavesWaitingBgsave(int bgsaveerr, int type) {
     listNode *ln;
     int startbgsave = 0;
     listIter li;
@@ -724,34 +825,50 @@ void updateSlavesWaitingBgsave(int bgsaveerr) {
         } else if (slave->replstate == REDIS_REPL_WAIT_BGSAVE_END) {
             struct redis_stat buf;
 
-            if (bgsaveerr != REDIS_OK) {
-                freeClient(slave);
-                redisLog(REDIS_WARNING,"SYNC failed. BGSAVE child returned an error");
-                continue;
-            }
-            if ((slave->repldbfd = open(server.rdb_filename,O_RDONLY)) == -1 ||
-                redis_fstat(slave->repldbfd,&buf) == -1) {
-                freeClient(slave);
-                redisLog(REDIS_WARNING,"SYNC failed. Can't open/stat DB after BGSAVE: %s", strerror(errno));
-                continue;
-            }
-            slave->repldboff = 0;
-            slave->repldbsize = buf.st_size;
-            slave->replstate = REDIS_REPL_SEND_BULK;
-            aeDeleteFileEvent(server.el,slave->fd,AE_WRITABLE);
-            if (aeCreateFileEvent(server.el, slave->fd, AE_WRITABLE, sendBulkToSlave, slave, 1) == AE_ERR) {
-                freeClient(slave);
-                continue;
+            /* If this was an RDB on disk save, we have to prepare to send
+             * the RDB from disk to the slave socket. Otherwise if this was
+             * already an RDB -> Slaves socket transfer, used in the case of
+             * diskless replication, our work is trivial, we can just put
+             * the slave online. */
+            if (type == REDIS_RDB_CHILD_TYPE_SOCKET) {
+                redisLog(REDIS_NOTICE,
+                    "Streamed RDB transfer with slave %s succeeded (socket). Waiting for REPLCONF ACK from slave to enable streaming",
+                        replicationGetSlaveName(slave));
+                /* Note: we wait for a REPLCONF ACK message from slave in
+                 * order to really put it online (install the write handler
+                 * so that the accumulated data can be transfered). However
+                 * we change the replication state ASAP, since our slave
+                 * is technically online now. */
+                slave->replstate = REDIS_REPL_ONLINE;
+                slave->repl_put_online_on_ack = 1;
+            } else {
+                if (bgsaveerr != REDIS_OK) {
+                    freeClient(slave);
+                    redisLog(REDIS_WARNING,"SYNC failed. BGSAVE child returned an error");
+                    continue;
+                }
+                if ((slave->repldbfd = open(server.rdb_filename,O_RDONLY)) == -1 ||
+                    redis_fstat(slave->repldbfd,&buf) == -1) {
+                    freeClient(slave);
+                    redisLog(REDIS_WARNING,"SYNC failed. Can't open/stat DB after BGSAVE: %s", strerror(errno));
+                    continue;
+                }
+                slave->repldboff = 0;
+                slave->repldbsize = buf.st_size;
+                slave->replstate = REDIS_REPL_SEND_BULK;
+                slave->replpreamble = sdscatprintf(sdsempty(),"$%lld\r\n",
+                    (unsigned long long) slave->repldbsize);
+
+                aeDeleteFileEvent(server.el,slave->fd,AE_WRITABLE);
+                if (aeCreateFileEvent(server.el, slave->fd, AE_WRITABLE, sendBulkToSlave, slave,1) == AE_ERR) {
+                    freeClient(slave);
+                    continue;
+                }
             }
         }
     }
     if (startbgsave) {
-        /* Since we are starting a new background save for one or more slaves,
-         * we flush the Replication Script Cache to use EVAL to propagate every
-         * new EVALSHA for the first time, since all the new slaves don't know
-         * about previous scripts. */
-        replicationScriptCacheFlush();
-        if (rdbSaveBackground(server.rdb_filename) != REDIS_OK) {
+        if (startBgsaveForReplication() != REDIS_OK) {
             listIter li;
 
             listRewind(server.slaves,&li);
@@ -792,8 +909,7 @@ void replicationAbortSyncTransfer(void) {
 void replicationSendNewlineToMaster(void) {
     static time_t newline_sent;
     if (time(NULL) != newline_sent) {
-        newline_sent = time(NULL);
-
+        newline_sent = time(NULL);        
         if( server.repl_transfer_ssl.ssl != NULL ) {
         	ssize_t nwritten = SSL_write(server.repl_transfer_ssl.ssl,"\n",1);
             if( nwritten != 1 ) {
@@ -807,11 +923,11 @@ void replicationSendNewlineToMaster(void) {
                 }
             }
         } else {
-        if (write(server.repl_transfer_s,"\n",1) == -1) {
-            /* Pinging back in this stage is best-effort. */
-        }
+            if (write(server.repl_transfer_s,"\n",1) == -1) {
+                /* Pinging back in this stage is best-effort. */
+            }
+        }        newline_sent = time(NULL);
     }
-}
 }
 
 /* Callback used by emptyDb() while flushing away old data to load
@@ -831,7 +947,12 @@ void readSyncBulkPayload(aeEventLoop *el, int fd, void *privdata, int mask) {
     REDIS_NOTUSED(privdata);
     REDIS_NOTUSED(mask);
 
-    // TODO:
+    /* Static vars used to hold the EOF mark, and the last bytes received
+     * form the server: when they match, we reached the end of the transfer. */
+    static char eofmark[REDIS_RUN_ID_SIZE];
+    static char lastbytes[REDIS_RUN_ID_SIZE];
+    static int usemark = 0;
+
     /* If repl_transfer_size == -1 we still have to read the bulk length
      * from the master reply. */
     if (server.repl_transfer_size == -1) {
@@ -857,17 +978,44 @@ void readSyncBulkPayload(aeEventLoop *el, int fd, void *privdata, int mask) {
             redisLog(REDIS_WARNING,"Bad protocol from MASTER, the first byte is not '$' (we received '%s'), are you sure the host and port are right?", buf);
             goto error;
         }
-        server.repl_transfer_size = strtol(buf+1,NULL,10);
-        redisLog(REDIS_NOTICE,
-            "MASTER <-> SLAVE sync: receiving %lld bytes from master",
-            (long long) server.repl_transfer_size);
+
+        /* There are two possible forms for the bulk payload. One is the
+         * usual $<count> bulk format. The other is used for diskless transfers
+         * when the master does not know beforehand the size of the file to
+         * transfer. In the latter case, the following format is used:
+         *
+         * $EOF:<40 bytes delimiter>
+         *
+         * At the end of the file the announced delimiter is transmitted. The
+         * delimiter is long and random enough that the probability of a
+         * collision with the actual file content can be ignored. */
+        if (strncmp(buf+1,"EOF:",4) == 0 && strlen(buf+5) >= REDIS_RUN_ID_SIZE) {
+            usemark = 1;
+            memcpy(eofmark,buf+5,REDIS_RUN_ID_SIZE);
+            memset(lastbytes,0,REDIS_RUN_ID_SIZE);
+            /* Set any repl_transfer_size to avoid entering this code path
+             * at the next call. */
+            server.repl_transfer_size = 0;
+            redisLog(REDIS_NOTICE,
+                "MASTER <-> SLAVE sync: receiving streamed RDB from master");
+        } else {
+            usemark = 0;
+            server.repl_transfer_size = strtol(buf+1,NULL,10);
+            redisLog(REDIS_NOTICE,
+                "MASTER <-> SLAVE sync: receiving %lld bytes from master",
+                (long long) server.repl_transfer_size);
+        }
         return;
     }
 
     /* Read bulk data */
-    left = server.repl_transfer_size - server.repl_transfer_read;
-    readlen = (left < (signed)sizeof(buf)) ? left : (signed)sizeof(buf);
-
+    if (usemark) {
+        readlen = sizeof(buf);
+    } else {
+        left = server.repl_transfer_size - server.repl_transfer_read;
+        readlen = (left < (signed)sizeof(buf)) ? left : (signed)sizeof(buf);
+    }
+    
     if( server.repl_transfer_ssl.ssl ) {
       nread = SSL_read(server.repl_transfer_ssl.ssl, buf, readlen);
       if( nread <= 0 ) {
@@ -880,7 +1028,7 @@ void readSyncBulkPayload(aeEventLoop *el, int fd, void *privdata, int mask) {
           if( error_nbr != 0 ) {
             char error[65535];
             ERR_error_string_n(error_nbr, error, 65535);
-            redisLog( REDIS_WARNING, "SSL ERROR: %s", error);
+            redisLog( REDIS_WARNING, "replication.c 1043: SSL ERROR: %s", error);
           }
 
           if( nread == 0 && error_nbr == 0 ) {
@@ -891,23 +1039,52 @@ void readSyncBulkPayload(aeEventLoop *el, int fd, void *privdata, int mask) {
         }
       }
     } else {
-      nread = read(fd,buf,readlen);
-      if (nread <= 0) {
+	nread = read(fd,buf,readlen);
+        if (nread <= 0) {
         redisLog(REDIS_WARNING,"I/O error trying to sync with MASTER: %s",
                  (nread == -1) ? strerror(errno) : "connection lost");
       }
     }
 
     if (nread <= 0) {
+
         replicationAbortSyncTransfer();
         return;
     }
+    server.stat_net_input_bytes += nread;
+
+    /* When a mark is used, we want to detect EOF asap in order to avoid
+     * writing the EOF mark into the file... */
+    int eof_reached = 0;
+
+    if (usemark) {
+        /* Update the last bytes array, and check if it matches our delimiter.*/
+        if (nread >= REDIS_RUN_ID_SIZE) {
+            memcpy(lastbytes,buf+nread-REDIS_RUN_ID_SIZE,REDIS_RUN_ID_SIZE);
+        } else {
+            int rem = REDIS_RUN_ID_SIZE-nread;
+            memmove(lastbytes,lastbytes+nread,rem);
+            memcpy(lastbytes+rem,buf,nread);
+        }
+        if (memcmp(lastbytes,eofmark,REDIS_RUN_ID_SIZE) == 0) eof_reached = 1;
+    }
+
     server.repl_transfer_lastio = server.unixtime;
     if (write(server.repl_transfer_fd,buf,nread) != nread) {
         redisLog(REDIS_WARNING,"Write error or short write writing to the DB dump file needed for MASTER <-> SLAVE synchronization: %s", strerror(errno));
         goto error;
     }
     server.repl_transfer_read += nread;
+
+    /* Delete the last 40 bytes from the file if we reached EOF. */
+    if (usemark && eof_reached) {
+        if (ftruncate(server.repl_transfer_fd,
+            server.repl_transfer_read - REDIS_RUN_ID_SIZE) == -1)
+        {
+            redisLog(REDIS_WARNING,"Error truncating the RDB file received from the master for SYNC: %s", strerror(errno));
+            goto error;
+        }
+    }
 
     /* Sync data on disk from time to time, otherwise at the end of the transfer
      * we may suffer a big delay as the memory buffers are copied into the
@@ -923,7 +1100,12 @@ void readSyncBulkPayload(aeEventLoop *el, int fd, void *privdata, int mask) {
     }
 
     /* Check if the transfer is now complete */
-    if (server.repl_transfer_read == server.repl_transfer_size) {
+    if (!usemark) {
+        if (server.repl_transfer_read == server.repl_transfer_size)
+            eof_reached = 1;
+    }
+
+    if (eof_reached) {
         if (rename(server.repl_transfer_tmpfile,server.rdb_filename) == -1) {
             redisLog(REDIS_WARNING,"Failed trying to rename the temp DB into dump.rdb in MASTER <-> SLAVE synchronization: %s", strerror(errno));
             replicationAbortSyncTransfer();
@@ -947,7 +1129,7 @@ void readSyncBulkPayload(aeEventLoop *el, int fd, void *privdata, int mask) {
         zfree(server.repl_transfer_tmpfile);
         close(server.repl_transfer_fd);
         server.master = createClient(server.repl_transfer_s);
-        if( server.repl_transfer_ssl.ssl != NULL) {
+        if( server.repl_transfer_ssl.ssl ) {
           server.master->ssl = server.repl_transfer_ssl;
         }
         server.master->flags |= REDIS_MASTER;
@@ -1253,7 +1435,6 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
         return;
     }
 
-    // TODO:
     /* Fall back to SYNC if needed. Otherwise psync_result == PSYNC_FULLRESYNC
      * and the server.repl_master_runid and repl_master_initial_offset are
      * already populated. */
@@ -1452,6 +1633,55 @@ void slaveofCommand(redisClient *c) {
     addReply(c,shared.ok);
 }
 
+/* ROLE command: provide information about the role of the instance
+ * (master or slave) and additional information related to replication
+ * in an easy to process format. */
+void roleCommand(redisClient *c) {
+    if (server.masterhost == NULL) {
+        listIter li;
+        listNode *ln;
+        void *mbcount;
+        int slaves = 0;
+
+        addReplyMultiBulkLen(c,3);
+        addReplyBulkCBuffer(c,"master",6);
+        addReplyLongLong(c,server.master_repl_offset);
+        mbcount = addDeferredMultiBulkLength(c);
+        listRewind(server.slaves,&li);
+        while((ln = listNext(&li))) {
+            redisClient *slave = ln->value;
+            char ip[REDIS_IP_STR_LEN];
+
+            if (anetPeerToString(slave->fd,ip,sizeof(ip),NULL) == -1) continue;
+            if (slave->replstate != REDIS_REPL_ONLINE) continue;
+            addReplyMultiBulkLen(c,3);
+            addReplyBulkCString(c,ip);
+            addReplyBulkLongLong(c,slave->slave_listening_port);
+            addReplyBulkLongLong(c,slave->repl_ack_off);
+            slaves++;
+        }
+        setDeferredMultiBulkLength(c,mbcount,slaves);
+    } else {
+        char *slavestate = NULL;
+
+        addReplyMultiBulkLen(c,5);
+        addReplyBulkCBuffer(c,"slave",5);
+        addReplyBulkCString(c,server.masterhost);
+        addReplyLongLong(c,server.masterport);
+        switch(server.repl_state) {
+        case REDIS_REPL_NONE: slavestate = "none"; break;
+        case REDIS_REPL_CONNECT: slavestate = "connect"; break;
+        case REDIS_REPL_CONNECTING: slavestate = "connecting"; break;
+        case REDIS_REPL_RECEIVE_PONG: /* see next */
+        case REDIS_REPL_TRANSFER: slavestate = "sync"; break;
+        case REDIS_REPL_CONNECTED: slavestate = "connected"; break;
+        default: slavestate = "unknown"; break;
+        }
+        addReplyBulkCString(c,slavestate);
+        addReplyLongLong(c,server.master ? server.master->reploff : -1);
+    }
+}
+
 /* Send a REPLCONF ACK command to the master to inform it about the current
  * processed offset. If we are not connected with a master, the command has
  * no effects. */
@@ -1509,13 +1739,16 @@ void replicationCacheMaster(redisClient *c) {
     aeDeleteFileEvent(server.el,c->fd,AE_READABLE);
     aeDeleteFileEvent(server.el,c->fd,AE_WRITABLE);
     close(c->fd);
-
-
-    //TODO: CLean this socket up
     anetCleanupSSL( &c->ssl );
-
+ 
     /* Set fd to -1 so that we can safely call freeClient(c) later. */
     c->fd = -1;
+
+    /* Invalidate the Peer ID cache. */
+    if (c->peerid) {
+        sdsfree(c->peerid);
+        c->peerid = NULL;
+    }
 
     /* Caching the master happens instead of the actual freeClient() call,
      * so make sure to adjust the replication state. This function will
@@ -1537,7 +1770,7 @@ void replicationDiscardCachedMaster(void) {
 /* Turn the cached master into the current master, using the file descriptor
  * passed as argument as the socket for the new master.
  *
- * This funciton is called when successfully setup a partial resynchronization
+ * This function is called when successfully setup a partial resynchronization
  * so the stream of data that we'll receive will start from were this
  * master left. */
 void replicationResurrectCachedMaster(int newfd, anetSSLConnection* sslctn) {
@@ -1682,7 +1915,7 @@ int replicationScriptCacheExists(sds sha1) {
 
 /* --------------------------- REPLICATION CRON  ----------------------------- */
 
-/* Replication cron funciton, called 1 time per second. */
+/* Replication cron function, called 1 time per second. */
 void replicationCron(void) {
     /* Non blocking connection timeout? */
     if (server.masterhost &&
@@ -1712,8 +1945,7 @@ void replicationCron(void) {
 
     /* Check if we should connect to a MASTER */
     if (server.repl_state == REDIS_REPL_CONNECT) {
-        redisLog(REDIS_NOTICE,"Connecting to MASTER %s:%d",
-                server.masterhost, server.masterport);
+        redisLog(REDIS_NOTICE,"Connecting to MASTER...");
         if (connectWithMaster() == REDIS_OK) {
             redisLog(REDIS_NOTICE,"MASTER <-> SLAVE sync started");
         }
@@ -1725,7 +1957,7 @@ void replicationCron(void) {
     if (server.masterhost && server.master &&
         !(server.master->flags & REDIS_PRE_PSYNC))
         replicationSendAck();
-    
+
     /* If we have attached slaves, PING them from time to time.
      * So slaves can implement an explicit timeout to masters, and will
      * be able to detect a link disconnection even if the TCP connection
@@ -1749,8 +1981,10 @@ void replicationCron(void) {
             redisClient *slave = ln->value;
 
             if (slave->replstate == REDIS_REPL_WAIT_BGSAVE_START ||
-                slave->replstate == REDIS_REPL_WAIT_BGSAVE_END) {
-                if( slave->ssl.ssl != NULL ) {
+                (slave->replstate == REDIS_REPL_WAIT_BGSAVE_END &&
+                 server.rdb_child_type != REDIS_RDB_CHILD_TYPE_SOCKET))
+            {
+                if( slave->ssl.ssl ) {
                   SSL_write( slave->ssl.ssl,"\n", 1);
                 } else {
                   if (write(slave->fd, "\n", 1) == -1) {
@@ -1774,14 +2008,8 @@ void replicationCron(void) {
             if (slave->flags & REDIS_PRE_PSYNC) continue;
             if ((server.unixtime - slave->repl_ack_time) > server.repl_timeout)
             {
-                char ip[REDIS_IP_STR_LEN];
-                int port;
-
-                if (anetPeerToString(slave->fd,ip,sizeof(ip),&port) != -1) {
-                    redisLog(REDIS_WARNING,
-                        "Disconnecting timedout slave: %s:%d",
-                        ip, slave->slave_listening_port);
-                }
+                redisLog(REDIS_WARNING, "Disconnecting timedout slave: %s",
+                    replicationGetSlaveName(slave));
                 freeClient(slave);
             }
         }
@@ -1811,6 +2039,48 @@ void replicationCron(void) {
         listLength(server.repl_scriptcache_fifo) != 0)
     {
         replicationScriptCacheFlush();
+    }
+
+    /* If we are using diskless replication and there are slaves waiting
+     * in WAIT_BGSAVE_START state, check if enough seconds elapsed and
+     * start a BGSAVE.
+     *
+     * This code is also useful to trigger a BGSAVE if the diskless
+     * replication was turned off with CONFIG SET, while there were already
+     * slaves in WAIT_BGSAVE_START state. */
+    if (server.rdb_child_pid == -1 && server.aof_child_pid == -1) {
+        time_t idle, max_idle = 0;
+        int slaves_waiting = 0;
+        listNode *ln;
+        listIter li;
+
+        listRewind(server.slaves,&li);
+        while((ln = listNext(&li))) {
+            redisClient *slave = ln->value;
+            if (slave->replstate == REDIS_REPL_WAIT_BGSAVE_START) {
+                idle = server.unixtime - slave->lastinteraction;
+                if (idle > max_idle) max_idle = idle;
+                slaves_waiting++;
+            }
+        }
+
+        if (slaves_waiting && max_idle > server.repl_diskless_sync_delay) {
+            /* Start a BGSAVE. Usually with socket target, or with disk target
+             * if there was a recent socket -> disk config change. */
+            if (startBgsaveForReplication() == REDIS_OK) {
+                /* It started! We need to change the state of slaves
+                 * from WAIT_BGSAVE_START to WAIT_BGSAVE_END in case
+                 * the current target is disk. Otherwise it was already done
+                 * by rdbSaveToSlavesSockets() which is called by
+                 * startBgsaveForReplication(). */
+                listRewind(server.slaves,&li);
+                while((ln = listNext(&li))) {
+                    redisClient *slave = ln->value;
+                    if (slave->replstate == REDIS_REPL_WAIT_BGSAVE_START)
+                        slave->replstate = REDIS_REPL_WAIT_BGSAVE_END;
+                }
+            }
+        }
     }
 
     /* Refresh the number of slaves with lag <= min-slaves-max-lag. */

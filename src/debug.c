@@ -41,6 +41,12 @@
 #include "bio.h"
 #endif /* HAVE_BACKTRACE */
 
+#ifdef __CYGWIN__
+#ifndef SA_ONSTACK
+#define SA_ONSTACK 0x08000000
+#endif
+#endif
+
 /* ================================= Debugging ============================== */
 
 /* Compute the sha1 of string at 's' with 'len' bytes long.
@@ -319,15 +325,18 @@ void debugCommand(redisClient *c) {
                 (long long) sdslen(val->ptr),
                 (long long) sdsavail(val->ptr));
         }
-    } else if (!strcasecmp(c->argv[1]->ptr,"populate") && c->argc == 3) {
+    } else if (!strcasecmp(c->argv[1]->ptr,"populate") &&
+               (c->argc == 3 || c->argc == 4)) {
         long keys, j;
         robj *key, *val;
         char buf[128];
 
         if (getLongFromObjectOrReply(c, c->argv[2], &keys, NULL) != REDIS_OK)
             return;
+        dictExpand(c->db->dict,keys);
         for (j = 0; j < keys; j++) {
-            snprintf(buf,sizeof(buf),"key:%lu",j);
+            snprintf(buf,sizeof(buf),"%s:%lu",
+                (c->argc == 3) ? "key" : (char*)c->argv[3]->ptr, j);
             key = createStringObject(buf,strlen(buf));
             if (lookupKeyRead(c->db,key) != NULL) {
                 decrRefCount(key);
@@ -685,7 +694,7 @@ void logCurrentClient(void) {
     int j;
 
     redisLog(REDIS_WARNING, "--- CURRENT CLIENT INFO");
-    client = getClientInfoString(cc);
+    client = catClientInfoString(sdsempty(),cc);
     redisLog(REDIS_WARNING,"client: %s", client);
     sdsfree(client);
     for (j = 0; j < cc->argc; j++) {
@@ -845,9 +854,9 @@ void sigsegvHandler(int sig, siginfo_t *info, void *secret) {
 
     redisLog(REDIS_WARNING,
 "\n=== REDIS BUG REPORT END. Make sure to include from START to END. ===\n\n"
-"       Please report the crash opening an issue on github:\n\n"
+"       Please report the crash by opening an issue on github:\n\n"
 "           http://github.com/antirez/redis/issues\n\n"
-"  Suspect RAM error? Use redis-server --test-memory to veryfy it.\n\n"
+"  Suspect RAM error? Use redis-server --test-memory to verify it.\n\n"
 );
     /* free(messages); Don't call free() with possibly corrupted memory. */
     if (server.daemonize) unlink(server.pidfile);
@@ -930,7 +939,7 @@ void enableWatchdog(int period) {
         /* Watchdog was actually disabled, so we have to setup the signal
          * handler. */
         sigemptyset(&act.sa_mask);
-        act.sa_flags = SA_NODEFER | SA_ONSTACK | SA_SIGINFO;
+        act.sa_flags = SA_ONSTACK | SA_SIGINFO;
         act.sa_sigaction = watchdogSignalHandler;
         sigaction(SIGALRM, &act, NULL);
     }

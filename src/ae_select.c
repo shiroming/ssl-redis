@@ -128,12 +128,10 @@ static int aeApiPoll(aeEventLoop *eventLoop, struct timeval *tvp) {
             aeFileEvent *fe = &eventLoop->events[j];
 
             if (fe->mask == AE_NONE) continue;
-            if (fe->mask & AE_READABLE && FD_ISSET(j,&state->_rfds)) {
+            if (fe->mask & AE_READABLE && FD_ISSET(j,&state->_rfds))
                 mask |= AE_READABLE;
-            }
-            if (fe->mask & AE_WRITABLE && FD_ISSET(j,&state->_wfds)) {
+            if (fe->mask & AE_WRITABLE && FD_ISSET(j,&state->_wfds))
                 mask |= AE_WRITABLE;
-            }
             eventLoop->fired[numevents].fd = j;
             eventLoop->fired[numevents].mask = mask;
             numevents++;

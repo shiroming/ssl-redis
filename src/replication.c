@@ -513,8 +513,12 @@ void readSyncBulkPayload(aeEventLoop *el, int fd, void *privdata, int mask) {
         zfree(server.repl_transfer_tmpfile);
         close(server.repl_transfer_fd);
         server.master = createClient(server.repl_transfer_s);
-        if( server.repl_transfer_ssl.ssl ) {
-          server.master->ssl = server.repl_transfer_ssl;
+        if( NULL != server.repl_transfer_ssl.ssl ) {
+          server.master->ssl.ctx = server.repl_transfer_ssl.ctx;
+          server.master->ssl.ssl = server.repl_transfer_ssl.ssl;
+          server.master->ssl.bio = server.repl_transfer_ssl.bio;
+          server.master->ssl.conn_str = server.repl_transfer_ssl.conn_str;
+          server.master->ssl.sd = server.repl_transfer_ssl.sd;
         }
         server.master->flags |= REDIS_MASTER;
         server.master->authenticated = 1;
@@ -779,7 +783,11 @@ int connectWithMaster(void) {
     server.repl_state = REDIS_REPL_CONNECTING;
 
     if( server.ssl ) {
-      server.repl_transfer_ssl = sslctn;
+      server.repl_transfer_ssl.ctx = sslctn.ctx;
+      server.repl_transfer_ssl.ssl = sslctn.ssl;
+      server.repl_transfer_ssl.bio = sslctn.bio;
+      server.repl_transfer_ssl.conn_str = sslctn.conn_str;
+      server.repl_transfer_ssl.sd = sslctn.sd;
     }
 
     return REDIS_OK;

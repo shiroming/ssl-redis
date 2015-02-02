@@ -556,6 +556,10 @@ clusterLink *createClusterLink(clusterNode *node) {
     link->sndbuf = sdsempty();
     link->rcvbuf = sdsempty();
     link->node = node;
+    link->ssl.ssl = NULL;
+    link->ssl.bio = NULL;
+    link->ssl.ctx = NULL;
+    link->ssl.sd = -1;
     link->fd = -1;
     return link;
 }
@@ -604,6 +608,7 @@ void clusterAcceptHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
                     "Error accepting cluster node: %s", server.neterr);
             return;
         }
+
         anetNonBlock(NULL,cfd);
         anetEnableTcpNoDelay(NULL,cfd);
 
@@ -618,10 +623,10 @@ void clusterAcceptHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
         link = createClusterLink(NULL);
 
         if( server.ssl ) {
-              redisLog(REDIS_VERBOSE,"Switching connection to SSL");
+              redisLog(REDIS_WARNING,"Switching connection to SSL");
               int ret = anetSSLAccept( server.neterr, cfd, server, &sslctn );
 
-              redisLog( REDIS_WARNING, "RET: %d ", ret );
+              redisLog( REDIS_VERBOSE, "RET: %d ", ret );
 
               if( ret < 0 ) {
                   redisLog(REDIS_WARNING,"Error accepting SSL client connection." );
@@ -629,9 +634,15 @@ void clusterAcceptHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
                   close( cfd );
                   return;
               }
+
+              link->ssl.ssl = sslctn.ssl;
+              link->ssl.ctx = sslctn.ctx;
+              link->ssl.bio = sslctn.bio;
+              link->ssl.conn_str = sslctn.conn_str;
+              link->ssl.sd = sslctn.sd;
+			  // cfd = sslctn.sd;
         }
 
-        link->ssl = sslctn;
         link->fd = cfd;
         aeCreateFileEvent(server.el,cfd,AE_READABLE,clusterReadHandler,link,1);
     }
@@ -1930,18 +1941,16 @@ void clusterWriteHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
     		int errorCode = SSL_get_error( link->ssl.ssl, nwritten );
     		if( SSL_ERROR_WANT_READ == errorCode || SSL_ERROR_WANT_WRITE == errorCode) {
     			return;
-            } else {
-                redisLog(REDIS_DEBUG,"I/O error writing to node link: %s",
-                    strerror(errno));
-                handleLinkIOError(link);
-                return;
-            }
+        } else {
+          redisLog(REDIS_WARNING,"Write: I/O error writing to node link: %s", strerror(errno));
+          handleLinkIOError(link);
+          return;
         }
+      }
     } else {
         nwritten = write(fd, link->sndbuf, sdslen(link->sndbuf));
         if (nwritten <= 0) {
-            redisLog(REDIS_DEBUG,"I/O error writing to node link: %s",
-                strerror(errno));
+            redisLog(REDIS_WARNING,"I/O error writing to node link: %s", strerror(errno));
             handleLinkIOError(link);
             return;
         }
@@ -1991,39 +2000,44 @@ void clusterReadHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
         }
 
         if( link->ssl.ssl ) {
-              nread = SSL_read( link->ssl.ssl, buf, sizeof(buf));
-              if( nread < 0 ) {
+              nread = SSL_read( link->ssl.ssl, buf, readlen);
+              if( nread <= 0 ) {
             	  int errorCode = SSL_get_error( link->ssl.ssl, nread );
-            	  if( SSL_ERROR_WANT_READ == errorCode || SSL_ERROR_WANT_WRITE == errorCode) {
+            	  if( errno == EAGAIN && (SSL_ERROR_WANT_READ == errorCode || SSL_ERROR_WANT_WRITE == errorCode) ) {
             		  return;
             	  } else if( SSL_ERROR_ZERO_RETURN == errorCode ) {
-            		  redisLog(REDIS_DEBUG,"SSL ERROR: Server closed the connection");
+            		  redisLog(REDIS_WARNING,"SSL ERROR: Server closed the connection");
             		  handleLinkIOError(link);
             		  return;
             	  } else {
             		  char error[65535];
             		  ERR_error_string_n(ERR_get_error(), error, 65535);
-            		  redisLog(REDIS_DEBUG,"SSL ERROR: %s", error);
+            		  redisLog(REDIS_WARNING,"SSL ERROR: %s", error);
             		  handleLinkIOError(link);
             		  return;
             	  }
+              } else {
+                /* Read data and recast the pointer to the new buffer. */
+                link->rcvbuf = sdscatlen(link->rcvbuf,buf,nread);
+                hdr = (clusterMsg*) link->rcvbuf;
+                rcvbuflen += nread;
               }
         } else {
         	nread = read(fd,buf,readlen);
-            if (nread == -1 && errno == EAGAIN) return; /* No more data ready. */
-        }
+          if (nread == -1 && errno == EAGAIN) return; /* No more data ready. */
 
-        if (nread <= 0) {
+          if (nread <= 0) {
             /* I/O error... */
-            redisLog(REDIS_DEBUG,"I/O error reading from node link: %s",
+            redisLog(REDIS_WARNING,"I/O error reading from node link: %s",
                 (nread == 0) ? "connection closed" : strerror(errno));
             handleLinkIOError(link);
             return;
-        } else {
+          } else {
             /* Read data and recast the pointer to the new buffer. */
             link->rcvbuf = sdscatlen(link->rcvbuf,buf,nread);
             hdr = (clusterMsg*) link->rcvbuf;
             rcvbuflen += nread;
+          }
         }
 
         /* Total length obtained? Process this packet. */
@@ -2972,7 +2986,7 @@ void clusterCron(void) {
 
             // TODO: This needs to connect with SSL if configured.
             if( server.ssl ) {
-              fd = anetSSLGenericConnect(server.neterr, node->ip, node->port+REDIS_CLUSTER_PORT_INCR, 0, &sslctn, server.ssl_root_file, server.ssl_root_dir, server.ssl_srvr_cert_common_name );
+              fd = anetSSLGenericConnect(server.neterr, node->ip, node->port+REDIS_CLUSTER_PORT_INCR, 0, &sslctn, server.ssl_root_file, server.ssl_root_dir, server.ssl_srvr_cert_common_name );              
               if( fd < 0 ) {
             	  if (node->ping_sent == 0) node->ping_sent = mstime();
             	                  redisLog(REDIS_DEBUG, "Unable to connect to "
@@ -2981,6 +2995,7 @@ void clusterCron(void) {
             	                      server.neterr);
             	                  continue;
               }
+            anetNonBlock(NULL, fd);  
             } else {
             	fd = anetTcpNonBlockBindConnect(server.neterr, node->ip, node->port+REDIS_CLUSTER_PORT_INCR, REDIS_BIND_ADDR);
             }
@@ -3000,10 +3015,17 @@ void clusterCron(void) {
             }
             link = createClusterLink(node);
             link->fd = fd;
-            link->ssl = sslctn;
+            if( server.ssl && sslctn.ssl != NULL ) {
+            	link->ssl.ssl = sslctn.ssl;
+            	link->ssl.ctx = sslctn.ctx;
+            	link->ssl.bio = sslctn.bio;
+            	link->ssl.conn_str = sslctn.conn_str;
+            	link->ssl.sd = sslctn.sd;
+            	// link->fd =sslctn.sd;
+            }
             node->link = link;
             aeCreateFileEvent(server.el,link->fd,AE_READABLE,
-                    clusterReadHandler,link,1);
+                    clusterReadHandler,link,0);
             /* Queue a PING in the new connection ASAP: this is crucial
              * to avoid false positives in failure detection.
              *
@@ -4401,6 +4423,7 @@ migrateCachedSocket* migrateGetSocket(redisClient *c, robj *host, robj *port, lo
     				server.neterr);
     		return NULL;
     	}
+    	anetNonBlock(NULL,sslctn->sd);
     	fd = sslctn->sd;
     } else {
     	/* Create the socket */
@@ -4417,11 +4440,14 @@ migrateCachedSocket* migrateGetSocket(redisClient *c, robj *host, robj *port, lo
     anetEnableTcpNoDelay(server.neterr,fd);
 
     /* Check if it connects within the specified timeout. */
-    if ((aeWait(fd,sslctn->ssl,AE_WRITABLE,timeout) & AE_WRITABLE) == 0) {
+    SSL *ssl = NULL;
+    if( NULL != sslctn ) ssl = sslctn->ssl;
+
+    if ((aeWait(fd,ssl,AE_WRITABLE,timeout) & AE_WRITABLE) == 0) {
         sdsfree(name);
         addReplySds(c,
             sdsnew("-IOERR error or timeout connecting to the client\r\n"));
-        if( server.ssl ) {
+        if( NULL != sslctn ) {
         	anetCleanupSSL( sslctn );
         	zfree(sslctn);
         } else {
@@ -4432,6 +4458,7 @@ migrateCachedSocket* migrateGetSocket(redisClient *c, robj *host, robj *port, lo
 
     /* Add to the cache and return it to the caller. */
     cs = zmalloc(sizeof(*cs));
+    
     cs->ssl_ctn = sslctn;
     cs->fd = fd;
     cs->last_use_time = server.unixtime;
@@ -4591,7 +4618,7 @@ try_again:
         /* Read the two replies */
         SSL* ssl = NULL;
         if(NULL != cs->ssl_ctn) ssl = cs->ssl_ctn->ssl;
-
+        
         if (syncReadLine(cs->fd, ssl, buf1, sizeof(buf1), timeout) <= 0)
             goto socket_rd_err;
         if (syncReadLine(cs->fd, ssl, buf2, sizeof(buf2), timeout) <= 0)

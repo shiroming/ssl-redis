@@ -1,3 +1,42 @@
+SSL-Redis
+-----------------------
+This project is a fork Redis by antirez, updated to enable native SSL communications with clients and slaves.  
+
+If you want to use ssl-redis from PHP, I suggest you use my fork of nicholasfs' phpredis called ssl-phpredis
+
+Portions of the changes in this fork are copyright 2012 Triton Digital Media, and released to the public 
+domain as open source under the BSD license.  Other changes are copyright by Brad Broerman, and released 
+to the public domain  as open source under the BSD license. All other portions of this codebase remain 
+copyright Salvatore Sanfilippo and other contributors, as listed in the code.
+
+The original source is: https://github.com/antirez/redis
+The home website fo redis is: http://redis.io/
+
+This is a work-in-progress. I will be making updates as I test, find bugs, or other issues.
+If you find bugs, or have isues, please contact me at bbroerman@bbroerman.net
+
+To enable SSL on redis-server, add these lines to the redis.config:
+ssl true
+ssl_ca_root_dir < Path to your openSSL root certificates directory >
+ssl_ca_root_file < Path to your openSSL root certificate file (You must specify either a root CA file, or a directory, but not both) >
+ssl_cert_file <Path to your server's SSL cert>
+ssl_cert_pass <optional - password for server cert file>
+ssl_pk_file <Path to your server's private key file (may be the same as above)>
+ssl_dhk_file <Path to your Diffie-Hellman data file>
+ssl_cipher_list <optional - cypher list to use for the server. Defaults to ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH>
+
+If you will be using slave or servers or cluster, and want to validate the common name in the certificate of the master server, you can add the option:
+ssl_cert_common_name <common name to match>
+
+To enable SSL on redis-client:
+./redis-cli -h <optional host> -p <optional port> -ssl 
+
+to specify a Root Certificate Authority file or directory, you should use:
+    -cadir  <optional path to the openSSL root certificate directory>
+    -cafile <optional path to the openSSL root certificate file>
+    
+You should specify a file, or a path, but not both. If neither are specified, it will default to the directory /etc/ssl/certs
+
 Where to find complete Redis documentation?
 -------------------------------------------
 

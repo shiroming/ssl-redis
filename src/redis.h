@@ -36,13 +36,6 @@
 #include "latency.h" /* Latency monitor API */
 #include "sparkline.h" /* ASII graphs API */
 
-
-
-
-#define redisAssertWithInfo(_c,_o,_e) ((_e)?(void)0 : (_redisAssertWithInfo(_c,_o,#_e,__FILE__,__LINE__),_exit(1)))
-#define redisAssert(_e) ((_e)?(void)0 : (_redisAssert(#_e,__FILE__,__LINE__),_exit(1)))
-#define redisPanic(_e) _redisPanic(#_e,__FILE__,__LINE__),_exit(1)
-
 /*-----------------------------------------------------------------------------
  * Data types
  *----------------------------------------------------------------------------*/

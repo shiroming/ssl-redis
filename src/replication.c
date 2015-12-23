@@ -778,11 +778,7 @@ void putSlaveOnline(redisClient *slave) {
     slave->repl_put_online_on_ack = 0;
     slave->repl_ack_time = server.unixtime;
     if (aeCreateFileEvent(server.el, slave->fd, AE_WRITABLE,
-<<<<<<< .mine
         sendReplyToClient, slave,1) == AE_ERR) {
-=======
-        sendReplyToClient, slave, 1) == AE_ERR) {
->>>>>>> .r95
         redisLog(REDIS_WARNING,"Unable to register writable event for slave bulk transfer: %s", strerror(errno));
         freeClient(slave);
         return;
@@ -2161,11 +2157,7 @@ void replicationScriptCacheAdd(sds sha1) {
     sds key = sdsdup(sha1);
 
     /* Evict oldest. */
-<<<<<<< .mine
-    if (listLength(server.repl_scriptcache_fifo) ==  (unsigned int)server.repl_scriptcache_size)
-=======
     if (listLength(server.repl_scriptcache_fifo) == (unsigned int)server.repl_scriptcache_size)
->>>>>>> .r95
     {
         listNode *ln = listLast(server.repl_scriptcache_fifo);
         sds oldest = listNodeValue(ln);

@@ -1,6 +1,6 @@
 SSL-Redis
 -----------------------
-This project is a fork of the 2.6.17 stable version of Redis by antirez to enable native
+This project is a fork of the 2.6.24 stable version of Redis by antirez to enable native
 SSL communications with clients and slaves. 
 
 If you want to use ssl-redis from PHP, I suggest you use my fork of nicholasfs' phpredis called ssl-phpredis

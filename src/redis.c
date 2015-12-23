@@ -1190,19 +1190,11 @@ void beforeSleep(struct aeEventLoop *eventLoop) {
     REDIS_NOTUSED(eventLoop);
     listNode *ln;
     redisClient *c;
-<<<<<<< .mine
     
     /* Run a fast expire cycle (the called function will return
      * ASAP if a fast cycle is not needed). */
     if (server.active_expire_enabled && server.masterhost == NULL)
         activeExpireCycle(ACTIVE_EXPIRE_CYCLE_FAST);
-=======
-
-    /* Run a fast expire cycle (the called function will return
-     * ASAP if a fast cycle is not needed). */
-    if (server.active_expire_enabled && server.masterhost == NULL)
-        activeExpireCycle(ACTIVE_EXPIRE_CYCLE_FAST);
->>>>>>> .r95
 
     /* Try to process pending commands for clients that were just unblocked. */
     while (listLength(server.unblocked_clients)) {

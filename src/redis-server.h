@@ -3,10 +3,7 @@
 
 #include "fmacros.h"
 #include "config.h"
-
-#if defined(__sun)
 #include "solarisfixes.h"
-#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -241,22 +238,37 @@
 #define REDIS_CLIENT_TYPE_PUBSUB 2 /* Clients subscribed to PubSub channels. */
 #define REDIS_CLIENT_TYPE_COUNT 3
 
-/* Slave replication state - from the point of view of the slave. */
+/* Slave replication state. Used in server.repl_state for slaves to remember
+ * what to do next. */
 #define REDIS_REPL_NONE 0 /* No active replication */
 #define REDIS_REPL_CONNECT 1 /* Must connect to master */
 #define REDIS_REPL_CONNECTING 2 /* Connecting to master */
+/* --- Handshake states, must be ordered --- */
 #define REDIS_REPL_RECEIVE_PONG 3 /* Wait for PING reply */
-#define REDIS_REPL_TRANSFER 4 /* Receiving .rdb from master */
-#define REDIS_REPL_CONNECTED 5 /* Connected to master */
+#define REDIS_REPL_SEND_AUTH 4 /* Send AUTH to master */
+#define REDIS_REPL_RECEIVE_AUTH 5 /* Wait for AUTH reply */
+#define REDIS_REPL_SEND_PORT 6 /* Send REPLCONF listening-port */
+#define REDIS_REPL_RECEIVE_PORT 7 /* Wait for REPLCONF reply */
+#define REDIS_REPL_SEND_CAPA 8 /* Send REPLCONF capa */
+#define REDIS_REPL_RECEIVE_CAPA 9 /* Wait for REPLCONF reply */
+#define REDIS_REPL_SEND_PSYNC 10 /* Send PSYNC */
+#define REDIS_REPL_RECEIVE_PSYNC 11 /* Wait for PSYNC reply */
+/* --- End of handshake states --- */
+#define REDIS_REPL_TRANSFER 12 /* Receiving .rdb from master */
+#define REDIS_REPL_CONNECTED 13 /* Connected to master */
 
-/* Slave replication state - from the point of view of the master.
+/* State of slaves from the POV of the master. Used in client->replstate.
  * In SEND_BULK and ONLINE state the slave receives new updates
  * in its output queue. In the WAIT_BGSAVE state instead the server is waiting
  * to start the next background saving in order to send updates to it. */
-#define REDIS_REPL_WAIT_BGSAVE_START 6 /* We need to produce a new RDB file. */
-#define REDIS_REPL_WAIT_BGSAVE_END 7 /* Waiting RDB file creation to finish. */
-#define REDIS_REPL_SEND_BULK 8 /* Sending RDB file to slave. */
-#define REDIS_REPL_ONLINE 9 /* RDB file transmitted, sending just updates. */
+#define REDIS_REPL_WAIT_BGSAVE_START 14 /* We need to produce a new RDB file. */
+#define REDIS_REPL_WAIT_BGSAVE_END 15 /* Waiting RDB file creation to finish. */
+#define REDIS_REPL_SEND_BULK 16 /* Sending RDB file to slave. */
+#define REDIS_REPL_ONLINE 17 /* RDB file transmitted, sending just updates. */
+
+/* Slave capabilities. */
+#define SLAVE_CAPA_NONE 0
+#define SLAVE_CAPA_EOF (1<<0)   /* Can parse the RDB EOF streaming format. */
 
 /* Synchronous read timeout - slave side */
 #define REDIS_REPL_SYNCIO_TIMEOUT 5
@@ -368,7 +380,7 @@
  * The actual resolution depends on server.hz. */
 #define run_with_period(_ms_) if ((_ms_ <= 1000/server.hz) || !(server.cronloops%((_ms_)/(1000/server.hz))))
 
-/* We can print the stacktrace, so our assert is defined this way: */
+#define redisAssertWithInfo(_c,_o,_e) ((_e)?(void)0 : (_redisAssertWithInfo(_c,_o,#_e,__FILE__,__LINE__),_exit(1)))
 #define redisAssertWithInfo(_c,_o,_e) ((_e)?(void)0 : (_redisAssertWithInfo(_c,_o,#_e,__FILE__,__LINE__),_exit(1)))
 #define redisAssert(_e) ((_e)?(void)0 : (_redisAssert(#_e,__FILE__,__LINE__),_exit(1)))
 #define redisPanic(_e) _redisPanic(#_e,__FILE__,__LINE__),_exit(1)
@@ -472,8 +484,12 @@ typedef struct redisClient {
     long long reploff;      /* replication offset if this is our master */
     long long repl_ack_off; /* replication ack offset, if this is a slave */
     long long repl_ack_time;/* replication ack time, if this is a slave */
+    long long psync_initial_offset; /* FULLRESYNC reply offset other slaves
+                                       copying this slave output buffer
+                                       should use. */
     char replrunid[REDIS_RUN_ID_SIZE+1]; /* master run id if this is a master */
     int slave_listening_port; /* As configured with: SLAVECONF listening-port */
+    int slave_capa;         /* Slave capabilities: SLAVE_CAPA_* bitwise OR. */
     multiState mstate;      /* MULTI/EXEC state */
     blockingState bpop;     /* blocking state */
     list *watched_keys;     /* Keys WATCHED for MULTI/EXEC CAS */

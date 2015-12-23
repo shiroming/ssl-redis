@@ -14,6 +14,125 @@ HIGH:     There is a critical bug that may affect a subset of users. Upgrade!
 CRITICAL: There is a critical bug affecting MOST USERS. Upgrade ASAP.
 --------------------------------------------------------------------------------
 
+--[ Redis 2.8.24 ] Release date: 18 Dec 2015
+
+Upgrade urgency: MODERATE. We fixed a crash that happens very rarely, so
+                 updating does not hurt, but most users are unlikely to
+                 experience this condition because it requires some odd
+                 timing.
+
+* [FIX] lua_struct.c/getnum security issue fixed. (Luca Bruno discovered it,
+        patched by Sun He and Chris Lamb)
+* [FIX] Fix a race condition in processCommand() because of interactions
+        with freeMemoryIfNeeded(). Details in issue #2948 and especially
+        in the commit message d999f5a. (Race found analytically by
+        Oran Agra, patch by Salvatore Sanfilippo)
+
+* [NEW] Log offending memory access address on SIGSEGV/SIGBUS (Salvatore
+        Sanfilippo)
+        
+--[ Redis 2.8.23 ] Release date: 15 Oct 2015
+
+Upgrade urgency: MODERATE, the most important thing is a fix in the replication
+                 code that may make the slave hanging forever if the master
+                 remains with an open socket even if it is no longer able to
+                 reply.
+
+* [FIX] MOVE now moves the TTL as well. A bug lasting forever... finally
+        fixed thanks to Andy Grunwald that reported it.
+        (reported by Andy Grunwald, fixed by Salvatore Sanfilippo)
+* [FIX] Fix a false positive in HSTRLEN test.
+* [FIX] Fix a bug in redis-cli --pipe mode that was not able to read back
+        replies from the server incrementally. Now a mass import will use
+        a lot less memory, and you can use --pipe to do incremental streaming.
+        (reported by Twitter user @fsaintjacques, fixed by Salvatore
+        Sanfilippo)
+* [FIX] Slave detection of master timeout. (fixed by Kevin McGehee, refactoring
+        and regression test by Salvatore Sanfilippo)
+
+--[ Redis 2.8.22 ] Release date: 8 Sep 2015
+
+Upgrade urgency: HIGH for Redis and Sentinel. However note that in order to
+                 fix certain replication bugs, the replication internals were
+                 modified in a very heavy way. So while this release is
+                 conceptually saner, it may contain regressions. For this
+                 reason, before the release, QA activities were performed by
+                 me (antirez) and Redis Labs and no evident bug was found.
+
+* [FIX] A number of bugs related to replication PSYNC and the (yet experimental)
+        diskless replication feature were fixed. The bugs could lead to
+        inconsistency between masters and slaves. (Salvatore Sanfilippo, Oran
+        Agra fixed the issue found by Yuval Inbar)
+* [FIX] A replication bug in the context of PSYNC partial resynchonization was
+        found and fixed. This bug happens even when diskless replication is off
+        in the case different slaves connect at different times while the master
+        is creating an RDB file, and later a partial resynchronization is
+        attempted by a slave that connected not as the first one. (Salvatore
+        Sanfilippo, Oran Agra)
+* [FIX] Chained replication and PSYNC interactions leading to potential stale
+        chained slaves data set, see issue #2694. (Salvatore Sanfilippo fixed
+        an issue reported by "GeorgeBJ" user at Github)
+* [FIX] redis-cli --scan iteration fixed when returned cursor overflows
+        32 bit signed integer. (Ofir Luzon, Yuval Inbar)
+* [FIX] Sentinel: fixed a bug during the master switch process, where for a
+        failed conditional check, the new configuration is rewritten, during
+        a small window of time, in a corrupted way where the master is
+        also reported to be one of the slaves. This bug is rare to trigger
+        but apparently it happens in the wild, and the effect is to see
+        a replication loop where the master will try to replicate with itself.
+        A detailed explanation of the bug and its effects can be found in
+        the commit message here: https://github.com/antirez/redis/commit/c20218eb5770b2cafb12bc7092313b8358fedc0a.
+        The bug was found by Jan-Erik Rediger using a static analyzer and
+        fixed by Salvatore Sanfilippo.
+* [FIX] Sentinel lack of arity checks for certain commands.
+        (Rogerio Goncalves, Salvatore Sanfilippo)
+
+* [NEW] Replication internals rewritten in order to be more resistant to bugs.
+        The replication handshake in the slave side was rewritten as a non
+        blocking state machine. (Salvatore Sanfilippo, Oran Agra)
+* [NEW] New "replication capabilities" feature introduced in order to signal
+        from the master to the slave what are the features supported, so that
+        the master can choose the kind of replication to start (diskless or
+        not) when master and slave are of different versions. (Oran Agra,
+        Salvatore Sanfilippo)
+* [NEW] Log clients details when SLAVEOF command is received. (Salvatore
+        Sanfilippo with inputs from Nick Craver and Marc Gravell).
+
+--[ Redis 2.8.21 ] Release date: 4 Jun 2015
+
+Upgrade urgency: HIGH for Redis because of a security issue.
+                 LOW for Sentinel.
+
+* [FIX] Critical security issue fix by Ben Murphy: http://t.co/LpGTyZmfS7
+* [FIX] SMOVE reply fixed when src and dst keys are the same. (Glenn Nethercutt)
+* [FIX] Lua cmsgpack lib updated to support str8 type. (Sebastian Waisbrot)
+
+* [NEW] Senitnel: CKQUORUM and FLUSHCONFIG commands back ported.
+        (Salvatore Sanfilippo and Bill Anderson)
+
+--[ Redis 2.8.20 ] Release date: 5 May 2015
+
+Upgrade urgency: LOW for Redis, MODERATE for Sentinel.
+
+* [FIX] Sentinel memory leak due to hiredis fixed. (Salvatore Sanfilippo)
+* [FIX] Sentinel memory leak on duplicated instance. (Charsyam)
+* [FIX] Redis crash on Lua reaching output buffer limits. (Yossi Gottlieb)
+* [FIX] Sentinel flushes config on +slave events. (Bill Anderson)
+* [FIX] Fixes to diskless replication. (Oran Agra)
+* [FIX] Redis (non clustered & clustered) replication bug involving blocking
+        operations: see issue #2473. (Salvatore Sanfilippo)
+* [FIX] Config: missing activerehashing option support in CONFIG SET added.
+        (Salvatore Sanfilippo, thx to Bill Anderson)
+* [FIX] AOF bug unlikely to happen in practice and mostly harmless: child
+        process segfaults when parent is not reachable via pipe. (Sun He)
+* [FIX] Scripting engine now reports an error when misused with Lua debug
+        hooks, instead of crashing. (Salvatore Sanfilippo)
+* [FIX] INFO loading stats: three fixes.
+* [FIX] Fixed memory leaks in rdbSaveToSlavesSockets(). (Alon Diamant)
+
+* [NEW] Redis-cli --latency-dist backported from unstable.
+        (Salvatore Sanfilippo)
+
 --[ Redis 2.8.19 ] Release date: 16 Dec 2014
 
 # UPGRADE URGENCY: LOW for both Redis and Sentinel. This release mostly

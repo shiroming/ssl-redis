@@ -100,9 +100,9 @@ typedef struct redisAsyncContext {
     } sub;
 } redisAsyncContext;
 
-/* Functions that proxy to hiredis */redisAsyncContext *redisAsyncConnect(const char *ip, int port, int ssl, char* certfile, char* certdir);
-redisAsyncContext *redisAsyncConnectBind(const char *ip, int port, int ssl, char* certfile, char* certdir,  const char *source_addr);
 /* Functions that proxy to hiredis */
+redisAsyncContext *redisAsyncConnect(const char *ip, int port, int ssl, char* certfile, char* certdir);
+redisAsyncContext *redisAsyncConnectBind(const char *ip, int port, int ssl, char* certfile, char* certdir,  const char *source_addr);
 redisAsyncContext *redisAsyncConnectUnix(const char *path);
 int redisAsyncSetConnectCallback(redisAsyncContext *ac, redisConnectCallback *fn);
 int redisAsyncSetDisconnectCallback(redisAsyncContext *ac, redisDisconnectCallback *fn);

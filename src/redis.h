@@ -36,6 +36,10 @@
 #include "latency.h" /* Latency monitor API */
 #include "sparkline.h" /* ASII graphs API */
 
+<<<<<<< .mine
+
+=======
+>>>>>>> .r95
 /*-----------------------------------------------------------------------------
  * Data types
  *----------------------------------------------------------------------------*/
@@ -347,6 +351,8 @@ void replicationSetMaster(char *ip, int port);
 void replicationUnsetMaster(void);
 void replicationSendNewlineToMaster(void);
 char *replicationGetSlaveName(redisClient *c);
+long long getPsyncInitialOffset(void);
+int replicationSetupSlaveForFullResync(redisClient *slave, long long offset);
 
 /* Generic persistence functions */
 void startLoading(FILE *fp);

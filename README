@@ -1,6 +1,6 @@
 SSL-Redis
 -----------------------
-This project is a fork of the 2.8.19 stable version of Redis by antirez to enable native
+This project is a fork of the 2.8.24 stable version of Redis by antirez to enable native
 SSL communications with clients and slaves.  
 
 NOTE: I am still in the middle of merging SSL changes into this branch. It is by no means ready for use.

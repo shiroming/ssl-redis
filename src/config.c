@@ -158,7 +158,7 @@ void loadServerConfigFromString(char *config) {
           server.ssl_dhk_file = zstrdup(argv[1]);
         } else if( !strcasecmp(argv[0],"ssl_cert_common_name") && argc == 2) {
           server.ssl_srvr_cert_common_name = zstrdup(argv[1]);
-        } else if( !strcasecmp(argv[0],"ssl_cert_pass") && argc == 2) {          
+        } else if( !strcasecmp(argv[0],"ssl_cert_pass") && argc == 2) {
           server.ssl_srvr_cert_passwd = zstrdup(argv[1]);
         } else if( !strcasecmp(argv[0],"ssl_cert_common_name") && argc == 2) {
           server.ssl_srvr_cert_common_name = zstrdup(argv[1]);
@@ -658,6 +658,7 @@ void loadServerConfig(char *filename, char *options) {
 void configSetCommand(redisClient *c) {
     robj *o;
     long long ll;
+    int err;
     redisAssertWithInfo(c,c->argv[2],sdsEncodedObject(c->argv[2]));
     redisAssertWithInfo(c,c->argv[3],sdsEncodedObject(c->argv[3]));
     o = c->argv[3];
@@ -677,8 +678,8 @@ void configSetCommand(redisClient *c) {
         zfree(server.masterauth);
         server.masterauth = ((char*)o->ptr)[0] ? zstrdup(o->ptr) : NULL;
     } else if (!strcasecmp(c->argv[2]->ptr,"maxmemory")) {
-        if (getLongLongFromObject(o,&ll) == REDIS_ERR ||
-            ll < 0) goto badfmt;
+        ll = memtoll(o->ptr,&err);
+        if (err || ll < 0) goto badfmt;
         server.maxmemory = ll;
         if (server.maxmemory) {
             if (server.maxmemory < zmalloc_used_memory()) {
@@ -833,6 +834,11 @@ void configSetCommand(redisClient *c) {
 
         if (yn == -1) goto badfmt;
         server.repl_slave_ro = yn;
+    } else if (!strcasecmp(c->argv[2]->ptr,"activerehashing")) {
+        int yn = yesnotoi(o->ptr);
+
+        if (yn == -1) goto badfmt;
+        server.activerehashing = yn;
     } else if (!strcasecmp(c->argv[2]->ptr,"dir")) {
         if (chdir((char*)o->ptr) == -1) {
             addReplyErrorFormat(c,"Changing directory: %s", strerror(errno));
@@ -900,7 +906,6 @@ void configSetCommand(redisClient *c) {
          * whole configuration string or accept it all, even if a single
          * error in a single client class is present. */
         for (j = 0; j < vlen; j++) {
-            char *eptr;
             long val;
 
             if ((j % 4) == 0) {
@@ -909,8 +914,8 @@ void configSetCommand(redisClient *c) {
                     goto badfmt;
                 }
             } else {
-                val = strtoll(v[j], &eptr, 10);
-                if (eptr[0] != '\0' || val < 0) {
+                val = memtoll(v[j], &err);
+                if (err || val < 0) {
                     sdsfreesplitres(v,vlen);
                     goto badfmt;
                 }
@@ -944,7 +949,8 @@ void configSetCommand(redisClient *c) {
         if (getLongLongFromObject(o,&ll) == REDIS_ERR || ll <= 0) goto badfmt;
         server.repl_timeout = ll;
     } else if (!strcasecmp(c->argv[2]->ptr,"repl-backlog-size")) {
-        if (getLongLongFromObject(o,&ll) == REDIS_ERR || ll <= 0) goto badfmt;
+        ll = memtoll(o->ptr,&err);
+        if (err || ll < 0) goto badfmt;
         resizeReplicationBacklog(ll);
     } else if (!strcasecmp(c->argv[2]->ptr,"repl-backlog-ttl")) {
         if (getLongLongFromObject(o,&ll) == REDIS_ERR || ll < 0) goto badfmt;
@@ -1052,20 +1058,6 @@ badfmt: /* Bad format errors */
         matches++; \
     } \
 } while(0);
-
-char *maxmemoryToString() {
-    char *s;
-    switch(server.maxmemory_policy) {
-    case REDIS_MAXMEMORY_VOLATILE_LRU: s = "volatile-lru"; break;
-    case REDIS_MAXMEMORY_VOLATILE_TTL: s = "volatile-ttl"; break;
-    case REDIS_MAXMEMORY_VOLATILE_RANDOM: s = "volatile-random"; break;
-    case REDIS_MAXMEMORY_ALLKEYS_LRU: s = "allkeys-lru"; break;
-    case REDIS_MAXMEMORY_ALLKEYS_RANDOM: s = "allkeys-random"; break;
-    case REDIS_MAXMEMORY_NO_EVICTION: s = "noeviction"; break;
-    default: s = "unknown"; break;
-    }
-    return s;
-}
 
 void configGetCommand(redisClient *c) {
     robj *o = c->argv[2];
@@ -1175,8 +1167,19 @@ void configGetCommand(redisClient *c) {
         matches++;
     }
     if (stringmatch(pattern,"maxmemory-policy",0)) {
+        char *s;
+
+        switch(server.maxmemory_policy) {
+        case REDIS_MAXMEMORY_VOLATILE_LRU: s = "volatile-lru"; break;
+        case REDIS_MAXMEMORY_VOLATILE_TTL: s = "volatile-ttl"; break;
+        case REDIS_MAXMEMORY_VOLATILE_RANDOM: s = "volatile-random"; break;
+        case REDIS_MAXMEMORY_ALLKEYS_LRU: s = "allkeys-lru"; break;
+        case REDIS_MAXMEMORY_ALLKEYS_RANDOM: s = "allkeys-random"; break;
+        case REDIS_MAXMEMORY_NO_EVICTION: s = "noeviction"; break;
+        default: s = "unknown"; break; /* too harmless to panic */
+        }
         addReplyBulkCString(c,"maxmemory-policy");
-        addReplyBulkCString(c,maxmemoryToString());
+        addReplyBulkCString(c,s);
         matches++;
     }
     if (stringmatch(pattern,"appendfsync",0)) {

@@ -1105,6 +1105,7 @@ int rewriteAppendOnlyFile(char *filename) {
             }
         }
         dictReleaseIterator(di);
+        di = NULL;
     }
 
     /* Do an initial slow fsync here while the parent is still sending
@@ -1168,9 +1169,9 @@ int rewriteAppendOnlyFile(char *filename) {
     return REDIS_OK;
 
 werr:
+    redisLog(REDIS_WARNING,"Write error writing append only file on disk: %s", strerror(errno));
     fclose(fp);
     unlink(tmpfile);
-    redisLog(REDIS_WARNING,"Write error writing append only file on disk: %s", strerror(errno));
     if (di) dictReleaseIterator(di);
     return REDIS_ERR;
 }

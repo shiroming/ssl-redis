@@ -280,7 +280,7 @@ static void writeHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
         		} else {
         			char error[65535];
         			ERR_error_string_n(ERR_get_error(), error, 65535);
-        			redisLog( REDIS_WARNING, "SSL ERROR: %s", error);
+        			fprintf(stderr, "SSL ERROR: %s", error);
         		}
         	}
         } else {
@@ -413,7 +413,7 @@ static client createClient(char *cmd, size_t len, client from) {
         }
     }
     if (config.idlemode == 0)
-    aeCreateFileEvent(config.el,c->context->fd,AE_WRITABLE,writeHandler,c,0);
+        aeCreateFileEvent(config.el,c->context->fd,AE_WRITABLE,writeHandler,c,0);
     listAddNodeTail(config.clients,c);
     config.liveclients++;
     return c;
@@ -516,7 +516,7 @@ int parseOptions(int argc, const char **argv) {
             config.certfile = sdsnew(argv[++i]);
         } else if (!strcmp(argv[i],"-cadir") && !lastarg) {
             sdsfree(config.certdir);
-            config.certdir = sdsnew(argv[++i]);
+            config.certdir = sdsnew(argv[++i]); 
         } else if (!strcmp(argv[i],"-s")) {
             if (lastarg) goto invalid;
             config.hostsocket = strdup(argv[++i]);
@@ -583,11 +583,11 @@ usage:
 "Usage: redis-benchmark [-h <host>] [-p <port>] [-c <clients>] [-n <requests]> [-k <boolean>]\n\n"
 " -h <hostname>      Server hostname (default 127.0.0.1)\n"
 " -p <port>          Server port (default 6379)\n"
-" -s <socket>        Server socket (overrides host and port)\n"
-" -a <password>      Password for Redis Auth\n"
 " -ssl               Connect to the server using SSL\n"
 " -cadir <certdir>    Use the specified root CA cert directory.\n "
 " -cafile <certfile>  Use the specified root CA cert file.\n "
+" -s <socket>        Server socket (overrides host and port)\n"
+" -a <password>      Password for Redis Auth\n"
 " -c <clients>       Number of parallel connections (default 50)\n"
 " -n <requests>      Total number of requests (default 100000)\n"
 " -d <size>          Data size of SET/GET value in bytes (default 2)\n"
@@ -633,7 +633,7 @@ int showThroughput(struct aeEventLoop *eventLoop, long long id, void *clientData
     if (config.liveclients == 0) {
         fprintf(stderr,"All clients disconnected... aborting.\n");
         exit(1);
-    }
+    } 
     if (config.csv) return 250;
     if (config.idlemode == 1) {
         printf("clients: %d\r", config.liveclients);

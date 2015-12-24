@@ -51,7 +51,7 @@
 char* global_ssl_cert_password = NULL;
 
 int password_callback(char* buffer, int num, int rwflag, void* userdata) {
-    if ( NULL == global_ssl_cert_password || num < (int)(strlen(global_ssl_cert_password) + 1)) {
+    if ( NULL == global_ssl_cert_password || num < (strlen(global_ssl_cert_password) + 1)) {
       return(0);
     }
     strcpy(buffer, global_ssl_cert_password);
@@ -66,12 +66,12 @@ int verify_callback(int ok, X509_STORE_CTX* store) {
     int depth = X509_STORE_CTX_get_error_depth(store);
     int err = X509_STORE_CTX_get_error(store);
 
-    anetSetError("Error with certificate at depth: %d!\n", depth);
+    printf("Error with certificate at depth: %d!\n", depth);
     X509_NAME_oneline(X509_get_issuer_name(cert), data, 255);
-    anetSetError("  Issuer: %s\n", data);
+    printf("\tIssuer: %s\n", data);
     X509_NAME_oneline(X509_get_subject_name(cert), data, 255);
-    anetSetError("  Subject: %s\n", data);
-    anetSetError("  Error %d: %s\n", err, X509_verify_cert_error_string(err));
+    printf("\tSubject: %s\n", data);
+    printf("\tError %d: %s\n", err, X509_verify_cert_error_string(err));
   }
 
   return ok;
@@ -292,6 +292,7 @@ static int anetCreateSocket(char *err, int domain) {
     return s;
 }
 
+
 static int anetTcpGenericConnect(char *err, char *addr, int port,
                                  char *source_addr, int flags)
 {
@@ -323,7 +324,7 @@ static int anetTcpGenericConnect(char *err, char *addr, int port,
             if ((rv = getaddrinfo(source_addr, NULL, &hints, &bservinfo)) != 0)
             {
                 anetSetError(err, "%s", gai_strerror(rv));
-                goto end;
+                goto error;
             }
             for (b = bservinfo; b != NULL; b = b->ai_next) {
                 if (bind(s,b->ai_addr,b->ai_addrlen) != -1) {
@@ -334,7 +335,7 @@ static int anetTcpGenericConnect(char *err, char *addr, int port,
             freeaddrinfo(bservinfo);
             if (!bound) {
                 anetSetError(err, "bind: %s", strerror(errno));
-                goto end;
+                goto error;
             }
         }
         if (connect(s,p->ai_addr,p->ai_addrlen) == -1) {
@@ -359,9 +360,17 @@ error:
         close(s);
         s = ANET_ERR;
     }
+
 end:
     freeaddrinfo(servinfo);
-    return s;
+
+    /* Handle best effort binding: if a binding address was used, but it is
+     * not possible to create a socket, try again without a binding address. */
+    if (s == ANET_ERR && source_addr && (flags & ANET_CONNECT_BE_BINDING)) {
+        return anetTcpGenericConnect(err,addr,port,NULL,flags);
+    } else {
+        return s;
+    }
 }
 
 int anetSSLGenericConnect( char* err, char* addr, int port, int flags, anetSSLConnection* sslctn, char* certFilePath, char* certDirPath, char* checkCommonName ) {
@@ -449,14 +458,14 @@ int anetSSLGenericConnect( char* err, char* addr, int port, int flags, anetSSLCo
      anetCleanupSSL( sslctn );
      return ANET_ERR;
   }
- 
+
   int s = BIO_get_fd( bio, NULL );
 
   if (flags & ANET_CONNECT_NONBLOCK) {
        if (anetNonBlock(err,s) != ANET_OK)
          return ANET_ERR;
   }
-  
+
   return s;
 }
 
@@ -470,9 +479,18 @@ int anetTcpNonBlockConnect(char *err, char *addr, int port)
     return anetTcpGenericConnect(err,addr,port,NULL,ANET_CONNECT_NONBLOCK);
 }
 
-int anetTcpNonBlockBindConnect(char *err, char *addr, int port, char *source_addr)
+int anetTcpNonBlockBindConnect(char *err, char *addr, int port,
+                               char *source_addr)
 {
-    return anetTcpGenericConnect(err,addr,port,source_addr,ANET_CONNECT_NONBLOCK);
+    return anetTcpGenericConnect(err,addr,port,source_addr,
+            ANET_CONNECT_NONBLOCK);
+}
+
+int anetTcpNonBlockBestEffortBindConnect(char *err, char *addr, int port,
+                                         char *source_addr)
+{
+    return anetTcpGenericConnect(err,addr,port,source_addr,
+            ANET_CONNECT_NONBLOCK|ANET_CONNECT_BE_BINDING);
 }
 
 int anetUnixGenericConnect(char *err, char *path, int flags)
@@ -713,23 +731,6 @@ error:
     return -1;
 }
 
-/* Format an IP,port pair into something easy to parse. If IP is IPv6
- * (matches for ":"), the ip is surrounded by []. IP and port are just
- * separated by colons. This the standard to display addresses within Redis. */
-int anetFormatAddr(char *buf, size_t buf_len, char *ip, int port) {
-    return snprintf(buf,buf_len, strchr(ip,':') ?
-           "[%s]:%d" : "%s:%d", ip, port);
-}
-
-/* Like anetFormatAddr() but extract ip and port from the socket's peer. */
-int anetFormatPeer(int fd, char *buf, size_t buf_len) {
-    char ip[INET6_ADDRSTRLEN];
-    int port;
-
-    anetPeerToString(fd,ip,sizeof(ip),&port);
-    return anetFormatAddr(buf, buf_len, ip, port);
-}
-
 int anetSockName(int fd, char *ip, size_t ip_len, int *port) {
     struct sockaddr_storage sa;
     socklen_t salen = sizeof(sa);
@@ -750,14 +751,6 @@ int anetSockName(int fd, char *ip, size_t ip_len, int *port) {
         if (port) *port = ntohs(s->sin6_port);
     }
     return 0;
-}
-
-int anetFormatSock(int fd, char *fmt, size_t fmt_len) {
-    char ip[INET6_ADDRSTRLEN];
-    int port;
-
-    anetSockName(fd,ip,sizeof(ip),&port);
-    return anetFormatAddr(fmt, fmt_len, ip, port);
 }
 
 int anetSSLAccept( char *err, int fd, struct redisServer server, anetSSLConnection *ctn) {
@@ -856,10 +849,10 @@ int anetSSLAccept( char *err, int fd, struct redisServer server, anetSSLConnecti
       Note that as ciphers become broken, it will be necessary to change the available cipher list to remain secure.
     */
 
-    if( NULL == server.ssl_cipher_list || 0 == strlen(server.ssl_cipher_list) )
-    	SSL_CTX_set_cipher_list(ctx, "ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH");
+    if( NULL == server.ssl_srvr_cipher_list || 0 == strlen(server.ssl_srvr_cipher_list) )
+        SSL_CTX_set_cipher_list(ctx, "ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH");
     else
-    	SSL_CTX_set_cipher_list(ctx, server.ssl_cipher_list);
+    	SSL_CTX_set_cipher_list(ctx, server.ssl_srvr_cipher_list);
 
     // Set up our SSL object as before
     SSL* ssl = SSL_new(ctx);

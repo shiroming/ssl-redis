@@ -1015,6 +1015,7 @@ void redisFree(redisContext *c) {
 
 int redisFreeKeepFd(redisContext *c) {
 	int fd = c->fd;
+	cleanupSSL( &(c->ssl) );
 	c->fd = -1;
 	redisFree(c);
 	return fd;
@@ -1042,7 +1043,7 @@ redisContext *redisConnect(const char *ip, int port, int ssl, char* certfile, ch
     return c;
 }
 
-redisContext *redisConnectWithTimeout(const char *ip, int port,const struct timeval tv, int ssl, char* certfile, char* certdir) {
+redisContext *redisConnectWithTimeout(const char *ip, int port, const struct timeval tv, int ssl, char* certfile, char* certdir) {
     redisContext *c;
 
     c = redisContextInit();
@@ -1080,12 +1081,11 @@ redisContext *redisConnectNonBlock(const char *ip, int port, int ssl, char* cert
     return c;
 }
 
-redisContext *redisConnectBindNonBlock(const char *ip, int port,
-									   int ssl, char* certfile, char* certdir,
+redisContext *redisConnectBindNonBlock(const char *ip, int port, int ssl, char* certfile, char* certdir,
                                        const char *source_addr) {
     redisContext *c = redisContextInit();
     c->flags &= ~REDIS_BLOCK;
-
+        
     if( ssl ) {
     	setupSSL();
     	// TODO: Create a bind version of this...
@@ -1093,7 +1093,7 @@ redisContext *redisConnectBindNonBlock(const char *ip, int port,
     } else {
        	redisContextConnectBindTcp(c,ip,port,NULL,source_addr);
     }
-
+    
     return c;
 }
 
@@ -1238,6 +1238,14 @@ int redisBufferWrite(redisContext *c, int *done) {
         }
 
         if (nwritten == -1) {
+	        if( c->ssl.ssl ) {
+        	   int errorCode = SSL_get_error( c->ssl.ssl, nwritten );
+               if( ( SSL_ERROR_WANT_READ != errorCode && SSL_ERROR_WANT_WRITE != errorCode) ||
+               ( SSL_ERROR_ZERO_RETURN == errorCode ) ) {
+                  __redisSetError(c,REDIS_ERR_IO,NULL);
+                  return REDIS_ERR;
+               }
+             }            
             if ((errno == EAGAIN && !(c->flags & REDIS_BLOCK)) || (errno == EINTR)) {
                 /* Try again later */
             } else {

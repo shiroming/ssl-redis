@@ -43,21 +43,23 @@
 #define AF_LOCAL AF_UNIX
 #endif
 
+#include "redis-server.h"
+#include <openssl/bio.h> // BIO objects for I/O
+#include <openssl/ssl.h> // SSL and SSL_CTX for SSL connections
+#include <openssl/err.h> // Error reporting
+
 #ifdef _AIX
 #undef ip_len
 #endif
 
 #define ANET_CONNECT_NONE 0
 #define ANET_CONNECT_NONBLOCK 1
-
-#include "redis-server.h" // required structures for server
-#include <openssl/bio.h>  // BIO objects for I/O
-#include <openssl/ssl.h>  // SSL and SSL_CTX for SSL connections
-#include <openssl/err.h>  // Error reporting
+#define ANET_CONNECT_BE_BINDING 2 /* Best effort binding. */
 
 int anetTcpConnect(char *err, char *addr, int port);
 int anetTcpNonBlockConnect(char *err, char *addr, int port);
 int anetTcpNonBlockBindConnect(char *err, char *addr, int port, char *source_addr);
+int anetTcpNonBlockBestEffortBindConnect(char *err, char *addr, int port, char *source_addr);
 int anetUnixConnect(char *err, char *path);
 int anetUnixNonBlockConnect(char *err, char *path);
 int anetRead(int fd, char *buf, int count);
@@ -78,9 +80,6 @@ int anetSendTimeout(char *err, int fd, long long ms);
 int anetPeerToString(int fd, char *ip, size_t ip_len, int *port);
 int anetKeepAlive(char *err, int fd, int interval);
 int anetSockName(int fd, char *ip, size_t ip_len, int *port);
-int anetFormatAddr(char *fmt, size_t fmt_len, char *ip, int port);
-int anetFormatPeer(int fd, char *fmt, size_t fmt_len);
-int anetFormatSock(int fd, char *fmt, size_t fmt_len);
 
 int anetSSLGenericConnect( char* err, char* addr, int port, int flags, anetSSLConnection* sslctn, char* certFilePath, char* certDirPath, char* commonname );
 int anetSSLAccept( char *err, int fd, redisServer server, anetSSLConnection *ctn);

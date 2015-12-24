@@ -37,10 +37,64 @@
 #include "sparkline.h" /* ASII graphs API */
 
 /*-----------------------------------------------------------------------------
+ * Data types
+ *----------------------------------------------------------------------------*/
+
+/* Macro used to initialize a Redis object allocated on the stack.
+ * Note that this macro is taken near the structure definition to make sure
+ * we'll update it when the structure is changed, to avoid bugs like
+ * bug #85 introduced exactly in this way. */
+#define initStaticStringObject(_var,_ptr) do { \
+    _var.refcount = 1; \
+    _var.type = REDIS_STRING; \
+    _var.encoding = REDIS_ENCODING_RAW; \
+    _var.ptr = _ptr; \
+} while(0);
+
+    uint64_t id;            /* Client incremental unique ID. */
+                            /* buffer or object being sent. */
+
+    struct sharedObjectsStruct {
+        robj *crlf, *ok, *err, *emptybulk, *czero, *cone, *cnegone, *pong, *space,
+        *colon, *nullbulk, *nullmultibulk, *queued,
+        *emptymultibulk, *wrongtypeerr, *nokeyerr, *syntaxerr, *sameobjecterr,
+        *outofrangeerr, *noscripterr, *loadingerr, *slowscripterr, *bgsaveerr,
+        *masterdownerr, *roslaveerr, *execaborterr, *noautherr, *noreplicaserr,
+        *busykeyerr, *oomerr, *plus, *messagebulk, *pmessagebulk, *subscribebulk,
+        *unsubscribebulk, *psubscribebulk, *punsubscribebulk, *del, *rpop, *lpop,
+        *lpush, *emptyscan, *minstring, *maxstring,
+        *select[REDIS_SHARED_SELECT_CMDS],
+        *integers[REDIS_SHARED_INTEGERS],
+        *mbulkhdr[REDIS_SHARED_BULKHDR_LEN], /* "*<value>\r\n" */
+        *bulkhdr[REDIS_SHARED_BULKHDR_LEN];  /* "$<value>\r\n" */
+    };
+
+/* ZSETs use a specialized version of Skiplists */
+typedef struct zskiplistNode {
+    robj *obj;
+    double score;
+    struct zskiplistNode *backward;
+    struct zskiplistLevel {
+        struct zskiplistNode *forward;
+        unsigned int span;
+    } level[];
+} zskiplistNode;
+
+typedef struct zskiplist {
+    struct zskiplistNode *header, *tail;
+    unsigned long length;
+    int level;
+} zskiplist;
+
+typedef struct zset {
+    dict *dict;
+    zskiplist *zsl;
+} zset;
+
+/*-----------------------------------------------------------------------------
  * Global server state
  *----------------------------------------------------------------------------*/
 
-    clientBufferLimitsConfig client_obuf_limits[REDIS_CLIENT_TYPE_COUNT];
 typedef struct pubsubPattern {
     redisClient *client;
     robj *pattern;
@@ -280,6 +334,7 @@ int equalStringObjects(robj *a, robj *b);
 unsigned long long estimateObjectIdleTime(robj *o);
 #define sdsEncodedObject(objptr) (objptr->encoding == REDIS_ENCODING_RAW || objptr->encoding == REDIS_ENCODING_EMBSTR)
 
+
 /* Synchronous I/O with timeout */
 ssize_t syncWrite(int fd, SSL* ssl, char *ptr, ssize_t size, long long timeout);
 ssize_t syncRead(int fd, SSL* ssl, char *ptr, ssize_t size, long long timeout);
@@ -306,6 +361,8 @@ int replicationCountAcksByOffset(long long offset);
 void replicationSendNewlineToMaster(void);
 long long replicationGetSlaveOffset(void);
 char *replicationGetSlaveName(redisClient *c);
+long long getPsyncInitialOffset(void);
+int replicationSetupSlaveForFullResync(redisClient *slave, long long offset);
 
 /* Generic persistence functions */
 void startLoading(FILE *fp);
@@ -386,7 +443,6 @@ void closeListeningSockets(int unlink_unix_socket);
 void updateCachedTime(void);
 void resetServerStats(void);
 unsigned int getLRUClock(void);
-char *maxmemoryToString(void);
 
 /* Set data type */
 robj *setTypeCreate(robj *value);
@@ -398,7 +454,6 @@ void setTypeReleaseIterator(setTypeIterator *si);
 int setTypeNext(setTypeIterator *si, robj **objele, int64_t *llele);
 robj *setTypeNextObject(setTypeIterator *si);
 int setTypeRandomElement(robj *setobj, robj **objele, int64_t *llele);
-unsigned long setTypeRandomElements(robj *set, unsigned long count, robj *aux_set);
 unsigned long setTypeSize(robj *subject);
 void setTypeConvert(robj *subject, int enc);
 
@@ -477,6 +532,7 @@ void getKeysFreeResult(int *result);
 int *zunionInterGetKeys(struct redisCommand *cmd,robj **argv, int argc, int *numkeys);
 int *evalGetKeys(struct redisCommand *cmd, robj **argv, int argc, int *numkeys);
 int *sortGetKeys(struct redisCommand *cmd, robj **argv, int argc, int *numkeys);
+int *migrateGetKeys(struct redisCommand *cmd, robj **argv, int argc, int *numkeys);
 
 /* Cluster */
 void clusterInit(void);
@@ -503,6 +559,7 @@ void blockClient(redisClient *c, int btype);
 void unblockClient(redisClient *c);
 void replyToBlockedClientTimedOut(redisClient *c);
 int getTimeoutFromObjectOrReply(redisClient *c, robj *object, mstime_t *timeout, int unit);
+void disconnectAllBlockedClients(void);
 
 /* Git SHA1 */
 char *redisGitSHA1(void);

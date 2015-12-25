@@ -356,6 +356,8 @@ int anetSSLGenericConnect( char* err, char* addr, int port, int flags, anetSSLCo
   SSL_CTX* ctx = SSL_CTX_new(SSLv3_client_method());
   sslctn->ctx = ctx;
 
+  SSL_CTX_set_cipher_list(ctx, "ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH");
+
   // Create a SSL object pointer, which our BIO object will provide.
   SSL* ssl;
 
@@ -369,7 +371,7 @@ int anetSSLGenericConnect( char* err, char* addr, int port, int flags, anetSSLCo
 
      ERR_error_string(1024,errorbuf);
      anetSetError(err, "SSL Error: Error creating BIO: %s\n", errorbuf);
-
+     fprintf( stderr, "SSL Error: Error creating BIO: %s\n", errorbuf);
      // We need to free up the SSL_CTX before we leave.
      anetCleanupSSL( sslctn );
      return ANET_ERR;
@@ -396,6 +398,7 @@ int anetSSLGenericConnect( char* err, char* addr, int port, int flags, anetSSLCo
     char errorbuf[1024];
     ERR_error_string(1024,errorbuf);
     anetSetError(err, "SSL Error: Failed to connect: %s\n", errorbuf);
+    fprintf( stderr, "SSL Error: Failed to connect: %s\n", errorbuf);
     anetCleanupSSL( sslctn );
     return ANET_ERR;
   }
@@ -405,6 +408,7 @@ int anetSSLGenericConnect( char* err, char* addr, int port, int flags, anetSSLCo
     char errorbuf[1024];
     ERR_error_string(1024,errorbuf);
     anetSetError(err, "SSL Error: handshake failure: %s\n", errorbuf);
+    fprintf( stderr, "SSL Error: handshake failure: %s\n", errorbuf);
     anetCleanupSSL( sslctn );
     return ANET_ERR;
   }
@@ -419,6 +423,7 @@ int anetSSLGenericConnect( char* err, char* addr, int port, int flags, anetSSLCo
     if( checkCommonName != NULL && strlen( checkCommonName ) > 0 ) {
       if(wildcmp(commonName, checkCommonName, strlen(checkCommonName)) == 0) {
         anetSetError(err, "SSL Error: Error validating peer common name: %s\n", commonName);
+        fprintf( stderr, "SSL Error: Error validating peer common name: %s\n", commonName);
         anetCleanupSSL( sslctn );
         return ANET_ERR;
       }
@@ -427,6 +432,7 @@ int anetSSLGenericConnect( char* err, char* addr, int port, int flags, anetSSLCo
      char errorbuf[1024];
      ERR_error_string(1024,errorbuf);
      anetSetError(err, "SSL Error: Error retrieving peer certificate: %s\n", errorbuf);
+     fprintf( stderr, "SSL Error: Error retrieving peer certificate: %s\n", errorbuf); 
      anetCleanupSSL( sslctn );
      return ANET_ERR;
   }
@@ -745,6 +751,7 @@ int anetSSLAccept( char *err, int fd, struct redisServer server, anetSSLConnecti
     // Did we get a handle to the file?
     if (bio == NULL) {
       anetSetError(err, "SSL Accept: Couldn't open DH param file");
+      fprintf(stderr, "SSL Accept: Couldn't open DH param file\n");
       anetCleanupSSL( ctn);
       return ANET_ERR;
     }
@@ -758,6 +765,7 @@ int anetSSLAccept( char *err, int fd, struct redisServer server, anetSSLConnecti
     // Set up our SSL_CTX to use the DH parameters.
     if (SSL_CTX_set_tmp_dh(ctx, ret) < 0) {
       anetSetError(err, "SSL Accept: Couldn't set DH parameters");
+      fprintf(stderr, "SSL Accept: Couldn't set DH parameters\n");
       anetCleanupSSL( ctn );
       return ANET_ERR;
     }
@@ -768,7 +776,8 @@ int anetSSLAccept( char *err, int fd, struct redisServer server, anetSSLConnecti
 
     // Set up our SSL_CTX to use the generated RSA key.
     if (!SSL_CTX_set_tmp_rsa(ctx, rsa)) {
-      anetSetError(err, "SSL Accept: Couldn't set RSA Key");
+      anetSetError(err, "SSL Accept: Couldn't set RSA Key\n");
+      
       anetCleanupSSL( ctn );
       return ANET_ERR;
     }
@@ -812,6 +821,7 @@ int anetSSLAccept( char *err, int fd, struct redisServer server, anetSSLConnecti
       ERR_error_string_n(ERR_get_error(), error, 65535);
 
       anetSetError(err, "SSL Accept: Error %d - %s ", SSL_get_error(ssl, r), error );
+      fprintf(stderr, "SSL Accept: Error %d - %s \n", SSL_get_error(ssl, r), error );
 
       // We failed to accept this client connection.
       // Ideally here you'll drop the connection and continue on.
@@ -822,6 +832,7 @@ int anetSSLAccept( char *err, int fd, struct redisServer server, anetSSLConnecti
     /* Verify certificate */
     if (SSL_get_verify_result(ssl) != X509_V_OK) {
       anetSetError(err, "SSL Accept: Certificate failed verification!");
+      fprintf(stderr, "SSL Accept: Certificate failed verification!\n");
       // Ideally here you'll close this connection and continue on.
       anetCleanupSSL( ctn );
       return ANET_ERR;

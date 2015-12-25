@@ -395,10 +395,26 @@ int replicationSetupSlaveForFullResync(redisClient *slave, long long offset) {
         buflen = snprintf(buf,sizeof(buf),"+FULLRESYNC %s %lld\r\n",
                           server.runid,offset);
 
-        // TODO: bbroerman - Set this up for SSL.
-        if (write(slave->fd,buf,buflen) != buflen) {
-            freeClientAsync(slave);
-            return REDIS_ERR;
+        if( slave->ssl.ssl ) {
+        	ssize_t nwritten = SSL_write(slave->ssl.ssl,buf,buflen);
+            if( nwritten != buflen ) {
+            	int errorCode = SSL_get_error( slave->ssl.ssl, nwritten );
+                if( SSL_ERROR_WANT_READ == errorCode || SSL_ERROR_WANT_WRITE == errorCode) {
+                	freeClientAsync(slave);
+                    return REDIS_ERR;
+                } else {
+                     char error[65535];
+                     ERR_error_string_n(ERR_get_error(), error, 65535);
+                     redisLog( REDIS_WARNING, "replication.c 419: SSL ERROR: %s", error);
+                     freeClientAsync(slave);
+                     return REDIS_ERR;
+                }
+            }
+        } else {
+        	if (write(slave->fd,buf,buflen) != buflen) {
+        	    freeClientAsync(slave);
+        	    return REDIS_ERR;
+        	}
         }
     }
     return REDIS_OK;

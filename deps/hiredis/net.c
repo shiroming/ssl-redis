@@ -358,8 +358,10 @@ int redisContextConnectSSL(redisContext *c, const char *addr, int port, char* ce
   c->ssl.bio = NULL;
 
   // Set up a SSL_CTX object, which will tell our BIO object how to do its work
-  SSL_CTX* ctx = SSL_CTX_new(TLSv1_1_client_method());
+  SSL_CTX* ctx = SSL_CTX_new(SSLv3_client_method());
   c->ssl.ctx = ctx;
+
+  SSL_CTX_set_cipher_list(ctx, "ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH");
 
   // Create a SSL object pointer, which our BIO object will provide.
   SSL* ssl;
@@ -375,7 +377,7 @@ int redisContextConnectSSL(redisContext *c, const char *addr, int port, char* ce
 
      ERR_error_string(1024,errorbuf);
      __redisSetError(c,REDIS_ERR_OTHER,errorbuf);
-
+     fprintf( stderr, "SSL Error: Error creating BIO!  %s\n", errorbuf);
      // We need to free up the SSL_CTX before we leave.
      cleanupSSL( &c->ssl );
      return REDIS_ERR;
@@ -425,6 +427,9 @@ int redisContextConnectSSL(redisContext *c, const char *addr, int port, char* ce
   	    __redisSetError(c,REDIS_ERR_OTHER,"SSL Error: Connection timed out.");
   	    ERR_error_string(1024,errorbuf);
   	    __redisSetError(c,REDIS_ERR_OTHER,errorbuf);
+  	    
+  	    fprintf( stderr, "SSL Error: Connection timed out.  %s\n", errorbuf);
+  	    
   	    cleanupSSL( &(c->ssl) );
   	    return REDIS_ERR;
   	  }
@@ -439,6 +444,9 @@ int redisContextConnectSSL(redisContext *c, const char *addr, int port, char* ce
         __redisSetError(c,REDIS_ERR_OTHER,"SSL Error: Failed to connect");
         ERR_error_string(1024,errorbuf);
         __redisSetError(c,REDIS_ERR_OTHER,errorbuf);
+        
+        fprintf( stderr, "SSL Error: Failed to connect.  %s\n", errorbuf);
+        
         cleanupSSL( &(c->ssl) );
         return REDIS_ERR;
       }
@@ -484,6 +492,9 @@ int redisContextConnectSSL(redisContext *c, const char *addr, int port, char* ce
   	    __redisSetError(c,REDIS_ERR_OTHER,"SSL Error: Connection timed out.");
   	    ERR_error_string(1024,errorbuf);
   	    __redisSetError(c,REDIS_ERR_OTHER,errorbuf);
+  	    
+  	    fprintf( stderr, "SSL Error: Connection timed out.  %s\n", errorbuf);
+  	    
   	    cleanupSSL( &(c->ssl) );
   	    return REDIS_ERR;
   	  }
@@ -498,6 +509,9 @@ int redisContextConnectSSL(redisContext *c, const char *addr, int port, char* ce
           __redisSetError(c,REDIS_ERR_OTHER,"SSL Error: handshake failure");
           ERR_error_string(1024,errorbuf);
           __redisSetError(c,REDIS_ERR_OTHER,errorbuf);
+          
+          fprintf( stderr, "SSL Error: handshake failure.  %s\n", errorbuf);
+          
           cleanupSSL( &(c->ssl) );
           return REDIS_ERR;
         }
@@ -551,6 +565,9 @@ int redisContextConnectSSL(redisContext *c, const char *addr, int port, char* ce
      __redisSetError(c,REDIS_ERR_OTHER,"SSL Error: Error retrieving peer certificate.\n" );
      ERR_error_string(1024,errorbuf);
      __redisSetError(c,REDIS_ERR_OTHER,errorbuf);
+     
+     fprintf( stderr, "SSL Error: Error retrieving peer certificate.  %s\n", errorbuf);
+     
      cleanupSSL( &(c->ssl) );
      return REDIS_ERR;
   }

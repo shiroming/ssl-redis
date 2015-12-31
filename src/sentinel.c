@@ -231,6 +231,7 @@ typedef struct redisAeEvents {
     redisAsyncContext *context;
     aeEventLoop *loop;
     int fd;
+    SSLConnection ssl;
     int reading, writing;
 } redisAeEvents;
 
@@ -304,6 +305,15 @@ static int redisAeAttach(aeEventLoop *loop, redisAsyncContext *ac) {
     e->context = ac;
     e->loop = loop;
     e->fd = c->fd;
+    
+    if( c->ssl != NULL ) {
+      e->ssl = c->ssl;
+      e->ssl.sd = c->ssl.sd;
+      e->ssl.ctx = c->ssl.ctx;
+      e->ssl.ssl = c->ssl.ssl;
+      e->ssl.bio = c->ssl.bio;
+    }
+
     e->reading = e->writing = 0;
 
     /* Register functions to start/stop listening for events */

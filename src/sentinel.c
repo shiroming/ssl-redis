@@ -306,7 +306,7 @@ static int redisAeAttach(aeEventLoop *loop, redisAsyncContext *ac) {
     e->loop = loop;
     e->fd = c->fd;
     
-    if( c->ssl != NULL ) {
+    if( c->ssl.ssl != NULL ) {
       e->ssl = c->ssl;
       e->ssl.sd = c->ssl.sd;
       e->ssl.ctx = c->ssl.ctx;
@@ -1715,8 +1715,13 @@ void sentinelSetClientName(sentinelRedisInstance *ri, redisAsyncContext *c, char
 void sentinelReconnectInstance(sentinelRedisInstance *ri) {
     if (!(ri->flags & SRI_DISCONNECTED)) return;
 
+    fprintf( stderr, "Called sentinelReconnectInstance" );
+
     /* Commands connection. */
     if (ri->cc == NULL) {
+    
+        fprintf( stderr, "inside cc == null" );
+    
     	// TODO: Need to add SSL connect here if configured in the sentinelRedisInstance config objet.
         ri->cc = redisAsyncConnectBind(ri->addr->ip,ri->addr->port,server.ssl, server.ssl_root_file, server.ssl_root_dir,REDIS_BIND_ADDR);
         if (ri->cc->err) {
@@ -1724,6 +1729,7 @@ void sentinelReconnectInstance(sentinelRedisInstance *ri) {
                 ri->cc->errstr);
             sentinelKillLink(ri,ri->cc);
         } else {
+            fprintf( stderr, "inside no error from redisAsyncConnectBind." );
             ri->cc_conn_time = mstime();
             ri->cc->data = ri;
             redisAeAttach(server.el,ri->cc);
@@ -1740,6 +1746,9 @@ void sentinelReconnectInstance(sentinelRedisInstance *ri) {
     }
     /* Pub / Sub */
     if ((ri->flags & (SRI_MASTER|SRI_SLAVE)) && ri->pc == NULL) {
+    
+     fprintf( stderr, "inside ((ri->flags & (SRI_MASTER|SRI_SLAVE)) && ri->pc == NULL)" ); 
+    
     // TODO: Need to add SSL connect here if configured in the sentinelRedisInstance config objet.
         ri->pc = redisAsyncConnectBind(ri->addr->ip,ri->addr->port,server.ssl, server.ssl_root_file, server.ssl_root_dir,REDIS_BIND_ADDR);
         if (ri->pc->err) {
@@ -1748,6 +1757,8 @@ void sentinelReconnectInstance(sentinelRedisInstance *ri) {
             sentinelKillLink(ri,ri->pc);
         } else {
             int retval;
+
+            fprintf( stderr, "inside no error from redisAsyncConnectBind." );
 
             ri->pc_conn_time = mstime();
             ri->pc->data = ri;

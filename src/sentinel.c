@@ -1726,7 +1726,7 @@ void sentinelReconnectInstance(sentinelRedisInstance *ri) {
         	// sentenel to detect a downed SSL server, we have to clear those out.
         	if( ri->cc->err &&
         		( strstr( ri->cc->errstr, "SSL Error: Connection timed out" ) != NULL ||
-        		  strstr( ri->cc->errstr, "SSL Error: Failed to connect." ) != NULL) {
+        		  strstr( ri->cc->errstr, "SSL Error: Failed to connect." ) != NULL) ) {
         		ri->cc->err = REDIS_OK;
         		ri->cc->errstr[0] = '\0';
         	}
@@ -1758,7 +1758,7 @@ void sentinelReconnectInstance(sentinelRedisInstance *ri) {
         	// sentenel to detect a downed SSL server, we have to clear those out.
         	if( ri->pc->err &&
         		( strstr( ri->pc->errstr, "SSL Error: Connection timed out" ) != NULL ||
-        		  strstr( ri->pc->errstr, "SSL Error: Failed to connect." ) != NULL) {
+        		  strstr( ri->pc->errstr, "SSL Error: Failed to connect." ) != NULL) ) {
         		ri->pc->err = REDIS_OK;
         		ri->pc->errstr[0] = '\0';
         	}

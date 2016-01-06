@@ -1718,6 +1718,16 @@ void sentinelReconnectInstance(sentinelRedisInstance *ri) {
     /* Commands connection. */
     if (ri->cc == NULL) {
         ri->cc = redisAsyncConnectBind(ri->addr->ip,ri->addr->port,server.ssl, server.ssl_root_file, server.ssl_root_dir,REDIS_BIND_ADDR);
+        if( server.ssl ) {
+        	// In nonblocking regular IO, a connection error would not be found here, but with SSL it is. So, in order for
+        	// sentenel to detect a downed SSL server, we have to clear those out.
+        	if( ri->cc->err &&
+        		( strstr( ri->cc->errstr, "SSL Error: Connection timed out" ) != NULL ||
+        		  strstr( ri->cc->errstr, "SSL Error: Failed to connect." ) != NULL) {
+        		ri->cc->err = REDIS_OK;
+        		ri->cc->errstr[0] = '\0';
+        	}
+        }
         if (ri->cc->err) {
             sentinelEvent(REDIS_DEBUG,"-cmd-link-reconnection",ri,"%@ #%s",
                 ri->cc->errstr);
@@ -1740,6 +1750,16 @@ void sentinelReconnectInstance(sentinelRedisInstance *ri) {
     /* Pub / Sub */
     if ((ri->flags & (SRI_MASTER|SRI_SLAVE)) && ri->pc == NULL) {
         ri->pc = redisAsyncConnectBind(ri->addr->ip,ri->addr->port,server.ssl, server.ssl_root_file, server.ssl_root_dir,REDIS_BIND_ADDR);
+        if( server.ssl ) {
+        	// In nonblocking regular IO, a connection error would not be found here, but with SSL it is. So, in order for
+        	// sentenel to detect a downed SSL server, we have to clear those out.
+        	if( ri->cc->err &&
+        		( strstr( ri->cc->errstr, "SSL Error: Connection timed out" ) != NULL ||
+        		  strstr( ri->cc->errstr, "SSL Error: Failed to connect." ) != NULL) {
+        		ri->cc->err = REDIS_OK;
+        		ri->cc->errstr[0] = '\0';
+        	}
+        }
         if (ri->pc->err) {
             sentinelEvent(REDIS_DEBUG,"-pubsub-link-reconnection",ri,"%@ #%s",
                 ri->pc->errstr);

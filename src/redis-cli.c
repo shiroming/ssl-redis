@@ -894,7 +894,7 @@ static void usage(void) {
 "  -h <hostname>      Server hostname (default: 127.0.0.1).\n"
 "  -p <port>          Server port (default: 6379).\n"
 "  -s <socket>        Server socket (overrides hostname and port).\n"
-"  -ssl                Use SSL."
+"  -ssl                Use SSL.\n"
 "  -cadir <certdir>    Use the specified root CA cert directory.\n "
 "  -cafile <certfile>  Use the specified root CA cert file.\n "
 "  -a <password>      Password to use when connecting to the server.\n"

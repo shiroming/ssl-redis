@@ -384,6 +384,8 @@ int anetSSLGenericConnect( char* err, char* addr, int port, int flags, anetSSLCo
   SSL_CTX* ctx = SSL_CTX_new(TLSv1_1_client_method());
   sslctn->ctx = ctx;
 
+  SSL_CTX_set_cipher_list(ctx, "ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH");
+
   // Create a SSL object pointer, which our BIO object will provide.
   SSL* ssl;
 

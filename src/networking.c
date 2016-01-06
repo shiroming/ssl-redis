@@ -557,7 +557,11 @@ static void acceptCommonHandler(int fd, anetSSLConnection *sslctn, int flags) {
 
     // If we're talking SSL, and we have a valid SSL connection, set the client's pointer to the ssl connection info.
     if( server.ssl && sslctn->ssl != NULL ) {
-      c->ssl = *sslctn;
+    	c->ssl.ctx = sslctn->ctx;
+    	c->ssl.ssl = sslctn->ssl;
+    	c->ssl.bio = sslctn->bio;
+    	c->ssl.conn_str = sslctn->conn_str;
+    	c->ssl.sd = sslctn->sd;
     }
 
     /* If maxclient directive is set and this is one client more... close the

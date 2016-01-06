@@ -1753,11 +1753,11 @@ void sentinelReconnectInstance(sentinelRedisInstance *ri) {
         if( server.ssl ) {
         	// In nonblocking regular IO, a connection error would not be found here, but with SSL it is. So, in order for
         	// sentenel to detect a downed SSL server, we have to clear those out.
-        	if( ri->cc->err &&
-        		( strstr( ri->cc->errstr, "SSL Error: Connection timed out" ) != NULL ||
-        		  strstr( ri->cc->errstr, "SSL Error: Failed to connect." ) != NULL) {
-        		ri->cc->err = REDIS_OK;
-        		ri->cc->errstr[0] = '\0';
+        	if( ri->pc->err &&
+        		( strstr( ri->pc->errstr, "SSL Error: Connection timed out" ) != NULL ||
+        		  strstr( ri->pc->errstr, "SSL Error: Failed to connect." ) != NULL) {
+        		ri->pc->err = REDIS_OK;
+        		ri->pc->errstr[0] = '\0';
         	}
         }
         if (ri->pc->err) {

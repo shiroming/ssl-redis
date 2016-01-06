@@ -237,7 +237,6 @@ int redisCheckSocketError(redisContext *c) {
     int err = 0;
     socklen_t errlen = sizeof(err);
 
-    // When coming in here after an SSL connect, I'm getting "Socket operation on non-socket"    
     if (getsockopt(c->fd, SOL_SOCKET, SO_ERROR, &err, &errlen) == -1) {
         __redisSetErrorFromErrno(c,REDIS_ERR_IO,"getsockopt(SO_ERROR)");
         return REDIS_ERR;
@@ -581,7 +580,7 @@ int redisContextConnectSSL(redisContext *c, const char *addr, int port, char* ce
           
     cleanupSSL( &(c->ssl) );
         
-    __redisSetError(c,REDIS_ERR_OTHER,rediserrorbuf);;
+    __redisSetError(c,REDIS_ERR_OTHER,rediserrorbuf);
     return REDIS_ERR;
   }
 

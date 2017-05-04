@@ -56,8 +56,10 @@
 
 /* Defined in hiredis.c */
 void __redisSetError(redisContext *c, int type, const char *str);
-int compareTimeval( struct timeval a, struct timeval b );
-struct timeval subtractTimeval( struct timeval a, struct timeval b);
+
+int compareTimeval(struct timeval a, struct timeval b);
+
+struct timeval subtractTimeval(struct timeval a, struct timeval b);
 
 static void redisContextCloseFd(redisContext *c) {
     if (c && c->fd >= 0) {
@@ -67,19 +69,19 @@ static void redisContextCloseFd(redisContext *c) {
 }
 
 static void __redisSetErrorFromErrno(redisContext *c, int type, const char *prefix) {
-    char buf[128] = { 0 };
+    char buf[128] = {0};
     size_t len = 0;
 
     if (prefix != NULL)
-        len = snprintf(buf,sizeof(buf),"%s: ",prefix);
-    strerror_r(errno,buf+len,sizeof(buf)-len);
-    __redisSetError(c,type,buf);
+        len = snprintf(buf, sizeof(buf), "%s: ", prefix);
+    strerror_r(errno, buf + len, sizeof(buf) - len);
+    __redisSetError(c, type, buf);
 }
 
 static int redisSetReuseAddr(redisContext *c) {
     int on = 1;
     if (setsockopt(c->fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) == -1) {
-        __redisSetErrorFromErrno(c,REDIS_ERR_IO,NULL);
+        __redisSetErrorFromErrno(c, REDIS_ERR_IO, NULL);
         redisContextCloseFd(c);
         return REDIS_ERR;
     }
@@ -89,7 +91,7 @@ static int redisSetReuseAddr(redisContext *c) {
 static int redisCreateSocket(redisContext *c, int type) {
     int s;
     if ((s = socket(type, SOCK_STREAM, 0)) == -1) {
-        __redisSetErrorFromErrno(c,REDIS_ERR_IO,NULL);
+        __redisSetErrorFromErrno(c, REDIS_ERR_IO, NULL);
         return REDIS_ERR;
     }
     c->fd = s;
@@ -108,7 +110,7 @@ static int redisSetBlocking(redisContext *c, int blocking) {
      * Note that fcntl(2) for F_GETFL and F_SETFL can't be
      * interrupted by a signal. */
     if ((flags = fcntl(c->fd, F_GETFL)) == -1) {
-        __redisSetErrorFromErrno(c,REDIS_ERR_IO,"fcntl(F_GETFL)");
+        __redisSetErrorFromErrno(c, REDIS_ERR_IO, "fcntl(F_GETFL)");
         redisContextCloseFd(c);
         return REDIS_ERR;
     }
@@ -119,7 +121,7 @@ static int redisSetBlocking(redisContext *c, int blocking) {
         flags |= O_NONBLOCK;
 
     if (fcntl(c->fd, F_SETFL, flags) == -1) {
-        __redisSetErrorFromErrno(c,REDIS_ERR_IO,"fcntl(F_SETFL)");
+        __redisSetErrorFromErrno(c, REDIS_ERR_IO, "fcntl(F_SETFL)");
         redisContextCloseFd(c);
         return REDIS_ERR;
     }
@@ -130,8 +132,8 @@ int redisKeepAlive(redisContext *c, int interval) {
     int val = 1;
     int fd = c->fd;
 
-    if (setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &val, sizeof(val)) == -1){
-        __redisSetError(c,REDIS_ERR_OTHER,strerror(errno));
+    if (setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &val, sizeof(val)) == -1) {
+        __redisSetError(c, REDIS_ERR_OTHER, strerror(errno));
         return REDIS_ERR;
     }
 
@@ -146,20 +148,20 @@ int redisKeepAlive(redisContext *c, int interval) {
 #ifndef __sun
     val = interval;
     if (setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &val, sizeof(val)) < 0) {
-        __redisSetError(c,REDIS_ERR_OTHER,strerror(errno));
+        __redisSetError(c, REDIS_ERR_OTHER, strerror(errno));
         return REDIS_ERR;
     }
 
-    val = interval/3;
+    val = interval / 3;
     if (val == 0) val = 1;
     if (setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &val, sizeof(val)) < 0) {
-        __redisSetError(c,REDIS_ERR_OTHER,strerror(errno));
+        __redisSetError(c, REDIS_ERR_OTHER, strerror(errno));
         return REDIS_ERR;
     }
 
     val = 3;
     if (setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &val, sizeof(val)) < 0) {
-        __redisSetError(c,REDIS_ERR_OTHER,strerror(errno));
+        __redisSetError(c, REDIS_ERR_OTHER, strerror(errno));
         return REDIS_ERR;
     }
 #endif
@@ -171,21 +173,21 @@ int redisKeepAlive(redisContext *c, int interval) {
 static int redisSetTcpNoDelay(redisContext *c) {
     int yes = 1;
     if (setsockopt(c->fd, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes)) == -1) {
-        __redisSetErrorFromErrno(c,REDIS_ERR_IO,"setsockopt(TCP_NODELAY)");
+        __redisSetErrorFromErrno(c, REDIS_ERR_IO, "setsockopt(TCP_NODELAY)");
         redisContextCloseFd(c);
-       return REDIS_ERR;
-   }
+        return REDIS_ERR;
+    }
     return REDIS_OK;
 }
 
 #define __MAX_MSEC (((LONG_MAX) - 999) / 1000)
 
 static int redisContextWaitReady(redisContext *c, const struct timeval *timeout) {
-    struct pollfd   wfd[1];
+    struct pollfd wfd[1];
     long msec;
 
-    msec          = -1;
-    wfd[0].fd     = c->fd;
+    msec = -1;
+    wfd[0].fd = c->fd;
     wfd[0].events = POLLOUT;
 
     /* Only use timeout when not NULL. */
@@ -206,9 +208,9 @@ static int redisContextWaitReady(redisContext *c, const struct timeval *timeout)
     if (errno == EINPROGRESS) {
         int res;
 
-        if( c->ssl.ctx != NULL ) {
-          if( SSL_pending( c->ssl.ssl ))
-            return REDIS_OK;
+        if (c->ssl.ctx != NULL) {
+            if (SSL_pending(c->ssl.ssl))
+                return REDIS_OK;
         }
 
         if ((res = poll(wfd, 1, msec)) == -1) {
@@ -217,7 +219,7 @@ static int redisContextWaitReady(redisContext *c, const struct timeval *timeout)
             return REDIS_ERR;
         } else if (res == 0) {
             errno = ETIMEDOUT;
-            __redisSetErrorFromErrno(c,REDIS_ERR_IO,NULL);
+            __redisSetErrorFromErrno(c, REDIS_ERR_IO, NULL);
             redisContextCloseFd(c);
             return REDIS_ERR;
         }
@@ -228,7 +230,7 @@ static int redisContextWaitReady(redisContext *c, const struct timeval *timeout)
         return REDIS_OK;
     }
 
-    __redisSetErrorFromErrno(c,REDIS_ERR_IO,NULL);
+    __redisSetErrorFromErrno(c, REDIS_ERR_IO, NULL);
     redisContextCloseFd(c);
     return REDIS_ERR;
 }
@@ -238,13 +240,13 @@ int redisCheckSocketError(redisContext *c) {
     socklen_t errlen = sizeof(err);
 
     if (getsockopt(c->fd, SOL_SOCKET, SO_ERROR, &err, &errlen) == -1) {
-        __redisSetErrorFromErrno(c,REDIS_ERR_IO,"getsockopt(SO_ERROR)");
+        __redisSetErrorFromErrno(c, REDIS_ERR_IO, "getsockopt(SO_ERROR)");
         return REDIS_ERR;
     }
 
     if (err) {
         errno = err;
-        __redisSetErrorFromErrno(c,REDIS_ERR_IO,NULL);
+        __redisSetErrorFromErrno(c, REDIS_ERR_IO, NULL);
         return REDIS_ERR;
     }
 
@@ -252,12 +254,12 @@ int redisCheckSocketError(redisContext *c) {
 }
 
 int redisContextSetTimeout(redisContext *c, const struct timeval tv) {
-    if (setsockopt(c->fd,SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof(tv)) == -1) {
-        __redisSetErrorFromErrno(c,REDIS_ERR_IO,"setsockopt(SO_RCVTIMEO)");
+    if (setsockopt(c->fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) == -1) {
+        __redisSetErrorFromErrno(c, REDIS_ERR_IO, "setsockopt(SO_RCVTIMEO)");
         return REDIS_ERR;
     }
-    if (setsockopt(c->fd,SOL_SOCKET,SO_SNDTIMEO,&tv,sizeof(tv)) == -1) {
-        __redisSetErrorFromErrno(c,REDIS_ERR_IO,"setsockopt(SO_SNDTIMEO)");
+    if (setsockopt(c->fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) == -1) {
+        __redisSetErrorFromErrno(c, REDIS_ERR_IO, "setsockopt(SO_SNDTIMEO)");
         return REDIS_ERR;
     }
     return REDIS_OK;
@@ -272,7 +274,7 @@ static int _redisContextConnectTcp(redisContext *c, const char *addr, int port,
     int blocking = (c->flags & REDIS_BLOCK);
 
     snprintf(_port, 6, "%d", port);
-    memset(&hints,0,sizeof(hints));
+    memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
 
@@ -281,31 +283,31 @@ static int _redisContextConnectTcp(redisContext *c, const char *addr, int port,
      * as this would add latency to every connect. Otherwise a more sensible
      * route could be: Use IPv6 if both addresses are available and there is IPv6
      * connectivity. */
-    if ((rv = getaddrinfo(addr,_port,&hints,&servinfo)) != 0) {
-         hints.ai_family = AF_INET6;
-         if ((rv = getaddrinfo(addr,_port,&hints,&servinfo)) != 0) {
-            __redisSetError(c,REDIS_ERR_OTHER,gai_strerror(rv));
+    if ((rv = getaddrinfo(addr, _port, &hints, &servinfo)) != 0) {
+        hints.ai_family = AF_INET6;
+        if ((rv = getaddrinfo(addr, _port, &hints, &servinfo)) != 0) {
+            __redisSetError(c, REDIS_ERR_OTHER, gai_strerror(rv));
             return REDIS_ERR;
         }
     }
     for (p = servinfo; p != NULL; p = p->ai_next) {
-        if ((s = socket(p->ai_family,p->ai_socktype,p->ai_protocol)) == -1)
+        if ((s = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1)
             continue;
 
         c->fd = s;
-        if (redisSetBlocking(c,0) != REDIS_OK)
+        if (redisSetBlocking(c, 0) != REDIS_OK)
             goto error;
         if (source_addr) {
             int bound = 0;
             /* Using getaddrinfo saves us from self-determining IPv4 vs IPv6 */
             if ((rv = getaddrinfo(source_addr, NULL, &hints, &bservinfo)) != 0) {
                 char buf[128];
-                snprintf(buf,sizeof(buf),"Can't get addr: %s",gai_strerror(rv));
-                __redisSetError(c,REDIS_ERR_OTHER,buf);
+                snprintf(buf, sizeof(buf), "Can't get addr: %s", gai_strerror(rv));
+                __redisSetError(c, REDIS_ERR_OTHER, buf);
                 goto error;
             }
             for (b = bservinfo; b != NULL; b = b->ai_next) {
-                if (bind(s,b->ai_addr,b->ai_addrlen) != -1) {
+                if (bind(s, b->ai_addr, b->ai_addrlen) != -1) {
                     bound = 1;
                     break;
                 }
@@ -313,23 +315,23 @@ static int _redisContextConnectTcp(redisContext *c, const char *addr, int port,
             freeaddrinfo(bservinfo);
             if (!bound) {
                 char buf[128];
-                snprintf(buf,sizeof(buf),"Can't bind socket: %s",strerror(errno));
-                __redisSetError(c,REDIS_ERR_OTHER,buf);
+                snprintf(buf, sizeof(buf), "Can't bind socket: %s", strerror(errno));
+                __redisSetError(c, REDIS_ERR_OTHER, buf);
                 goto error;
             }
         }
-        if (connect(s,p->ai_addr,p->ai_addrlen) == -1) {
+        if (connect(s, p->ai_addr, p->ai_addrlen) == -1) {
             if (errno == EHOSTUNREACH) {
                 redisContextCloseFd(c);
                 continue;
             } else if (errno == EINPROGRESS && !blocking) {
                 /* This is ok. */
             } else {
-                if (redisContextWaitReady(c,timeout) != REDIS_OK)
+                if (redisContextWaitReady(c, timeout) != REDIS_OK)
                     goto error;
             }
         }
-        if (blocking && redisSetBlocking(c,1) != REDIS_OK)
+        if (blocking && redisSetBlocking(c, 1) != REDIS_OK)
             goto error;
         if (redisSetTcpNoDelay(c) != REDIS_OK)
             goto error;
@@ -340,14 +342,14 @@ static int _redisContextConnectTcp(redisContext *c, const char *addr, int port,
     }
     if (p == NULL) {
         char buf[128];
-        snprintf(buf,sizeof(buf),"Can't create socket: %s",strerror(errno));
-        __redisSetError(c,REDIS_ERR_OTHER,buf);
+        snprintf(buf, sizeof(buf), "Can't create socket: %s", strerror(errno));
+        __redisSetError(c, REDIS_ERR_OTHER, buf);
         goto error;
     }
 
-error:
+    error:
     rv = REDIS_ERR;
-end:
+    end:
     freeaddrinfo(servinfo);
     return rv;  // Need to return REDIS_OK if alright
 }
@@ -363,272 +365,282 @@ int redisContextConnectBindTcp(redisContext *c, const char *addr, int port,
     return _redisContextConnectTcp(c, addr, port, timeout, source_addr);
 }
 
-int redisContextConnectSSL(redisContext *c, const char *addr, int port, char* certfile, char* certdir, struct timeval *timeout) {
-  struct timeval  start_time;
-  int             has_timeout = 0;
-  int             is_nonblocking = 0;
+int redisContextConnectSSL(redisContext *c, const char *addr, int port, char *tlsversion, char *certfile, char *certdir,
+                           struct timeval *timeout) {
+    struct timeval start_time;
+    int has_timeout = 0;
+    int is_nonblocking = 0;
 
-  c->ssl.sd = -1;
-  c->ssl.ctx = NULL;
-  c->ssl.ssl = NULL;
-  c->ssl.bio = NULL;
+    c->ssl.sd = -1;
+    c->ssl.ctx = NULL;
+    c->ssl.ssl = NULL;
+    c->ssl.bio = NULL;
+    SSL_CTX *ctx = NULL;
 
-  // Set up a SSL_CTX object, which will tell our BIO object how to do its work
-  SSL_CTX* ctx = SSL_CTX_new(TLSv1_1_client_method());
-  c->ssl.ctx = ctx;
+    // Set up a SSL_CTX object, which will tell our BIO object how to do its work
 
-  SSL_CTX_set_cipher_list(ctx, "ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH");
+//    SSL_CTX *ctx = SSL_CTX_new(TLSv1_2_client_method());
+    if (strcmp(tlsversion, "tls1.0") == 0) {
+        ctx = SSL_CTX_new(TLSv1_client_method());
+    } else if (strcmp(tlsversion, "tls1.1") == 0) {
+        ctx = SSL_CTX_new(TLSv1_1_client_method());
+    } else {
+        ctx = SSL_CTX_new(TLSv1_2_client_method());
+    }
+    c->ssl.ctx = ctx;
 
-  // Create a SSL object pointer, which our BIO object will provide.
-  SSL* ssl;
+    SSL_CTX_set_cipher_list(ctx, "ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH");
 
-  // Create our BIO object for SSL connections.
-  BIO* bio = BIO_new_ssl_connect(ctx);
-  c->ssl.bio = bio;
+    // Create a SSL object pointer, which our BIO object will provide.
+    SSL *ssl;
 
-  // Failure?
-  if (bio == NULL) {
-  	    char sslerrorbuf[1024];
+    // Create our BIO object for SSL connections.
+    BIO *bio = BIO_new_ssl_connect(ctx);
+    c->ssl.bio = bio;
+
+    // Failure?
+    if (bio == NULL) {
+        char sslerrorbuf[1024];
         char rediserrorbuf[1024];
 
-        ERR_error_string(1024,sslerrorbuf);
-        snprintf(rediserrorbuf,1023,"SSL Error: Error creating BIO.  %s\n", sslerrorbuf);
+        ERR_error_string(1024, sslerrorbuf);
+        snprintf(rediserrorbuf, 1023, "SSL Error: Error creating BIO.  %s\n", sslerrorbuf);
 
-  	    cleanupSSL( &(c->ssl) );
-  	    
-        __redisSetError(c,REDIS_ERR_OTHER,rediserrorbuf);  	    
-     return REDIS_ERR;
-  }
+        cleanupSSL(&(c->ssl));
 
-  // Makes ssl point to bio's SSL object.
-  BIO_get_ssl(bio, &ssl);
-  c->ssl.ssl = ssl;
-
-  // Set the SSL to automatically retry on failure.
-  SSL_set_mode(ssl, SSL_MODE_AUTO_RETRY);
-
-  char* connect_str = (char *)calloc( 1, strlen( addr ) + 10 );
-  sprintf( connect_str, "%s:%d", addr, port );
-  c->ssl.conn_str = connect_str;
-
-  // We're connection to the REDIS server at host:port
-  BIO_set_conn_hostname(bio, connect_str);
-
-  SSL_CTX_load_verify_locations(ctx, certfile, certdir);
-
-  // Are we supposed to be blocking or non-blocking?
-  if( (c->flags & REDIS_BLOCK) == 0) {
-	  is_nonblocking = 1;
-	  BIO_set_nbio(bio,1);
-  }
-
-  // What about a timeout?
-  // If we're blocking and have a timeout, we need to handle that specially
-  if( NULL != timeout ) {
-	BIO_set_nbio(bio,1);
-	has_timeout = 1;
-	gettimeofday(&start_time, NULL);
-  }
-
-  c->fd = BIO_get_fd( bio, NULL );
-
-  while(1) {
-    struct timeval	cur_time,
-		            elapsed_time;
-
-	if (has_timeout) {
-	  gettimeofday(&cur_time, NULL);
-      elapsed_time = subtractTimeval( cur_time, start_time );
-
-  	  if (compareTimeval( elapsed_time, *timeout) > 0) {
-  	    char sslerrorbuf[1024];
-        char rediserrorbuf[1024];
-
-        ERR_error_string(1024,sslerrorbuf);
-        snprintf(rediserrorbuf,1023,"SSL Error: Connection timed out.  %s\n", sslerrorbuf);
-        
-  	    cleanupSSL( &(c->ssl) );
-  	    
-        __redisSetError(c,REDIS_ERR_OTHER,rediserrorbuf);  	    
-  	    return REDIS_ERR;
-  	  }
-	}
-
-    // Same as before, try to connect.
-    if (BIO_do_connect(bio) <= 0 ) {
-      if( BIO_should_retry( bio ) ) {
-    	  // We need to retry.
-      } else {
-  	    char sslerrorbuf[1024];
-        char rediserrorbuf[1024];
-        
-        ERR_error_string(1024,sslerrorbuf);
-        snprintf(rediserrorbuf,1023,"SSL Error: Failed to connect.  %s\n", sslerrorbuf);
-        
-        cleanupSSL( &(c->ssl) );
-  	    
-        __redisSetError(c,REDIS_ERR_OTHER,rediserrorbuf);  	    
+        __redisSetError(c, REDIS_ERR_OTHER, rediserrorbuf);
         return REDIS_ERR;
-      }
+    }
+
+    // Makes ssl point to bio's SSL object.
+    BIO_get_ssl(bio, &ssl);
+    c->ssl.ssl = ssl;
+
+    // Set the SSL to automatically retry on failure.
+    SSL_set_mode(ssl, SSL_MODE_AUTO_RETRY);
+
+    char *connect_str = (char *) calloc(1, strlen(addr) + 10);
+    sprintf(connect_str, "%s:%d", addr, port);
+    c->ssl.conn_str = connect_str;
+
+    // We're connection to the REDIS server at host:port
+    BIO_set_conn_hostname(bio, connect_str);
+
+    SSL_CTX_load_verify_locations(ctx, certfile, certdir);
+
+    // Are we supposed to be blocking or non-blocking?
+    if ((c->flags & REDIS_BLOCK) == 0) {
+        is_nonblocking = 1;
+        BIO_set_nbio(bio, 1);
+    }
+
+    // What about a timeout?
+    // If we're blocking and have a timeout, we need to handle that specially
+    if (NULL != timeout) {
+        BIO_set_nbio(bio, 1);
+        has_timeout = 1;
+        gettimeofday(&start_time, NULL);
+    }
+
+    c->fd = BIO_get_fd(bio, NULL);
+
+    while (1) {
+        struct timeval cur_time,
+                elapsed_time;
+
+        if (has_timeout) {
+            gettimeofday(&cur_time, NULL);
+            elapsed_time = subtractTimeval(cur_time, start_time);
+
+            if (compareTimeval(elapsed_time, *timeout) > 0) {
+                char sslerrorbuf[1024];
+                char rediserrorbuf[1024];
+
+                ERR_error_string(1024, sslerrorbuf);
+                snprintf(rediserrorbuf, 1023, "SSL Error: Connection timed out.  %s\n", sslerrorbuf);
+
+                cleanupSSL(&(c->ssl));
+
+                __redisSetError(c, REDIS_ERR_OTHER, rediserrorbuf);
+                return REDIS_ERR;
+            }
+        }
+
+        // Same as before, try to connect.
+        if (BIO_do_connect(bio) <= 0) {
+            if (BIO_should_retry(bio)) {
+                // We need to retry.
+            } else {
+                char sslerrorbuf[1024];
+                char rediserrorbuf[1024];
+
+                ERR_error_string(1024, sslerrorbuf);
+                snprintf(rediserrorbuf, 1023, "SSL Error: Failed to connect.  %s\n", sslerrorbuf);
+
+                cleanupSSL(&(c->ssl));
+
+                __redisSetError(c, REDIS_ERR_OTHER, rediserrorbuf);
+                return REDIS_ERR;
+            }
+        } else {
+            // connect is done...
+            break;
+        }
+
+        if (has_timeout) {
+            // Do select and seelct on it
+            int result;
+            int fd = BIO_get_fd(bio, NULL);
+            struct timeval time_left;
+
+            if (has_timeout) {
+                time_left = subtractTimeval(*timeout, elapsed_time);
+            }
+
+            fd_set readset, writeset;
+            FD_ZERO(&readset);
+            FD_SET(fd, &readset);
+            FD_ZERO(&writeset);
+            FD_SET(fd, &writeset);
+
+            do {
+                result = select(fd + 1, &readset, &writeset, NULL, &time_left);
+            } while (result == -1 && errno == EINTR);
+        }
+
+    }
+
+    while (1) {
+        struct timeval cur_time,
+                elapsed_time;
+
+        if (has_timeout) {
+            gettimeofday(&cur_time, NULL);
+            elapsed_time = subtractTimeval(cur_time, start_time);
+
+            if (compareTimeval(elapsed_time, *timeout) > 0) {
+                char sslerrorbuf[1024];
+                char rediserrorbuf[1024];
+
+                ERR_error_string(1024, sslerrorbuf);
+                snprintf(rediserrorbuf, 1023, "SSL Error: Connection timed out.  %s\n", sslerrorbuf);
+
+                cleanupSSL(&(c->ssl));
+
+                __redisSetError(c, REDIS_ERR_OTHER, rediserrorbuf);
+                return REDIS_ERR;
+            }
+        }
+
+        // Now we need to do the SSL handshake, so we can communicate.
+        if (BIO_do_handshake(bio) <= 0) {
+            if (BIO_should_retry(bio)) {
+                // We need to retry.
+            } else {
+                char sslerrorbuf[1024];
+                char rediserrorbuf[1024];
+
+                ERR_error_string(1024, sslerrorbuf);
+                snprintf(rediserrorbuf, 1023, "SSL Error: Handshake Failure.  %s\n", sslerrorbuf);
+
+                cleanupSSL(&(c->ssl));
+
+                __redisSetError(c, REDIS_ERR_OTHER, rediserrorbuf);;
+                return REDIS_ERR;
+            }
+        } else {
+            // handshake is done...
+            break;
+        }
+
+        if (has_timeout) {
+            // Do select and seelct on it
+            int result;
+            int fd = BIO_get_fd(bio, NULL);
+            struct timeval time_left;
+
+            if (has_timeout) {
+                time_left = subtractTimeval(*timeout, elapsed_time);
+            }
+
+            fd_set readset, writeset;
+            FD_ZERO(&readset);
+            FD_SET(fd, &readset);
+            FD_ZERO(&writeset);
+            FD_SET(fd, &writeset);
+
+            do {
+                result = select(fd + 1, &readset, &writeset, NULL, &time_left);
+            } while (result == -1 && errno == EINTR);
+        }
+
+    }
+
+    long verify_result = SSL_get_verify_result(ssl);
+    if (verify_result == X509_V_OK) {
+        X509 *peerCertificate = SSL_get_peer_certificate(ssl);
+
+        char commonName[512];
+        X509_NAME *name = X509_get_subject_name(peerCertificate);
+        X509_NAME_get_text_by_NID(name, NID_commonName, commonName, 512);
+
+        // TODO: Add a redis config parameter for the common name to check for.
+        //       Since Redis connections are generally done with an IP address directly,
+        //       we can't just assume that the name we get on the addr is an actual name.
+        //
+        //    if(strcasecmp(commonName, "BradBroerman") != 0) {
+        //      __redisSetError(c,REDIS_ERR_OTHER,"SSL Error: Error validating cert common name.\n\n" );
+        //      cleanupSSL( &(c->ssl) );
+        //      return REDIS_ERR;
+
     } else {
-      // connect is done...
-      break;
-    }
-
-    if( has_timeout ) {
-    	// Do select and seelct on it
-    	int result;
-    	int fd = BIO_get_fd( bio, NULL );
-    	struct timeval time_left;
-
-    	if (has_timeout) {
-    	  time_left = subtractTimeval( *timeout, elapsed_time );
-    	}
-
-    	fd_set readset, writeset;
-        FD_ZERO(&readset);
-    	FD_SET(fd, &readset);
-        FD_ZERO(&writeset);
-    	FD_SET(fd, &writeset);
-
-    	do {
-    	  result = select( fd+1, &readset, &writeset, NULL, &time_left);
-    	} while( result == -1 && errno == EINTR );
-    }
-
-  }
-
-  while(1) {
-    struct timeval	cur_time,
-		            elapsed_time;
-
-	if (has_timeout) {
-	  gettimeofday(&cur_time, NULL);
-      elapsed_time = subtractTimeval( cur_time, start_time );
-
-  	  if (compareTimeval( elapsed_time, *timeout) > 0) {
-  	    char sslerrorbuf[1024];
+        char sslerrorbuf[1024];
         char rediserrorbuf[1024];
 
-        ERR_error_string(1024,sslerrorbuf);
-        snprintf(rediserrorbuf,1023,"SSL Error: Connection timed out.  %s\n", sslerrorbuf);
-        
-  	    cleanupSSL( &(c->ssl) );
-  	    
-        __redisSetError(c,REDIS_ERR_OTHER,rediserrorbuf);  	    
-  	    return REDIS_ERR;
-  	  }
-	}
+        ERR_error_string(1024, sslerrorbuf);
+        snprintf(rediserrorbuf, 1023, "SSL Error: Error retrieving peer certificate.  %s\n", sslerrorbuf);
 
-    // Now we need to do the SSL handshake, so we can communicate.
-    if (BIO_do_handshake(bio) <= 0) {
-        if( BIO_should_retry( bio ) ) {
-      	  // We need to retry.
-        } else {
-          char sslerrorbuf[1024];
-          char rediserrorbuf[1024];
-        
-          ERR_error_string(1024,sslerrorbuf);
-          snprintf(rediserrorbuf,1023,"SSL Error: Handshake Failure.  %s\n", sslerrorbuf);
-          
-          cleanupSSL( &(c->ssl) );
-        
-          __redisSetError(c,REDIS_ERR_OTHER,rediserrorbuf);;
-          return REDIS_ERR;
-        }
-    } else {
-    	// handshake is done...
-    	break;
+        cleanupSSL(&(c->ssl));
+
+        __redisSetError(c, REDIS_ERR_OTHER, rediserrorbuf);
+        return REDIS_ERR;
     }
 
-    if( has_timeout ) {
-    	// Do select and seelct on it
-    	int result;
-    	int fd = BIO_get_fd( bio, NULL );
-    	struct timeval time_left;
+    BIO_set_nbio(bio, is_nonblocking);
 
-    	if (has_timeout) {
-    	  time_left = subtractTimeval( *timeout, elapsed_time );
-    	}
+    c->ssl.sd = BIO_get_fd(bio, NULL);
+    c->fd = BIO_get_fd(bio, NULL);
 
-    	fd_set readset, writeset;
-        FD_ZERO(&readset);
-    	FD_SET(fd, &readset);
-        FD_ZERO(&writeset);
-    	FD_SET(fd, &writeset);
-
-    	do {
-    	  result = select( fd+1, &readset, &writeset, NULL, &time_left);
-    	} while( result == -1 && errno == EINTR );
-    }
-
-  }
-
-  long verify_result = SSL_get_verify_result(ssl);
-  if( verify_result == X509_V_OK) {
-    X509* peerCertificate = SSL_get_peer_certificate(ssl);
-
-    char commonName [512];
-    X509_NAME * name = X509_get_subject_name(peerCertificate);
-    X509_NAME_get_text_by_NID(name, NID_commonName, commonName, 512);
-
-    // TODO: Add a redis config parameter for the common name to check for.
-    //       Since Redis connections are generally done with an IP address directly,
-    //       we can't just assume that the name we get on the addr is an actual name.
-    //
-    //    if(strcasecmp(commonName, "BradBroerman") != 0) {
-    //      __redisSetError(c,REDIS_ERR_OTHER,"SSL Error: Error validating cert common name.\n\n" );
-    //      cleanupSSL( &(c->ssl) );
-    //      return REDIS_ERR;
-
-  } else {
-    char sslerrorbuf[1024];
-    char rediserrorbuf[1024];
-        
-    ERR_error_string(1024,sslerrorbuf);
-    snprintf(rediserrorbuf,1023,"SSL Error: Error retrieving peer certificate.  %s\n", sslerrorbuf);
-          
-     cleanupSSL( &(c->ssl) );
-        
-    __redisSetError(c,REDIS_ERR_OTHER,rediserrorbuf);
-     return REDIS_ERR;
-  }
-
-  BIO_set_nbio(bio,is_nonblocking);
-
-  c->ssl.sd = BIO_get_fd( bio, NULL );
-  c->fd = BIO_get_fd( bio, NULL );
-
-  return REDIS_OK;
+    return REDIS_OK;
 }
 
-void cleanupSSL( SSLConnection* ctn ) {
-  if( NULL != ctn ) {
-    if( NULL != ctn->ctx ) {
-      // Remember, we also need to free up that SSL_CTX object!
-      SSL_CTX_free(ctn->ctx);
-      ctn->ctx = NULL;
+void cleanupSSL(SSLConnection *ctn) {
+    if (NULL != ctn) {
+        if (NULL != ctn->ctx) {
+            // Remember, we also need to free up that SSL_CTX object!
+            SSL_CTX_free(ctn->ctx);
+            ctn->ctx = NULL;
+        }
+        if (NULL != ctn->bio) {
+            // Free up that BIO object we created.
+            BIO_free_all(ctn->bio);
+            ctn->bio = NULL;
+        }
+        if (NULL != ctn->conn_str) {
+            free(ctn->conn_str);
+            ctn->conn_str = NULL;
+        }
     }
-    if( NULL != ctn->bio ) {
-      // Free up that BIO object we created.
-      BIO_free_all(ctn->bio);
-      ctn->bio = NULL;
-    }
-    if( NULL != ctn->conn_str ) {
-      free( ctn->conn_str );
-      ctn->conn_str = NULL;
-    }
-  }
 
-  return;
+    return;
 }
 
 void setupSSL() {
-  CRYPTO_malloc_init(); // Initialize malloc, free, etc for OpenSSL's use
-  SSL_library_init(); // Initialize OpenSSL's SSL libraries
-  SSL_load_error_strings(); // Load SSL error strings
-  ERR_load_BIO_strings(); // Load BIO error strings
-  OpenSSL_add_all_algorithms(); // Load all available encryption algorithms
+    CRYPTO_malloc_init(); // Initialize malloc, free, etc for OpenSSL's use
+    SSL_library_init(); // Initialize OpenSSL's SSL libraries
+    SSL_load_error_strings(); // Load SSL error strings
+    ERR_load_BIO_strings(); // Load BIO error strings
+    OpenSSL_add_all_algorithms(); // Load all available encryption algorithms
 }
 
 int redisContextConnectUnix(redisContext *c, const char *path, const struct timeval *timeout) {
@@ -636,52 +648,51 @@ int redisContextConnectUnix(redisContext *c, const char *path, const struct time
     int blocking = (c->flags & REDIS_BLOCK);
     struct sockaddr_un sa;
 
-    if (redisCreateSocket(c,AF_LOCAL) < 0)
+    if (redisCreateSocket(c, AF_LOCAL) < 0)
         return REDIS_ERR;
-    if (redisSetBlocking(c,0) != REDIS_OK)
+    if (redisSetBlocking(c, 0) != REDIS_OK)
         return REDIS_ERR;
 
     sa.sun_family = AF_LOCAL;
-    strncpy(sa.sun_path,path,sizeof(sa.sun_path)-1);
-    if (connect(c->fd, (struct sockaddr*)&sa, sizeof(sa)) == -1) {
+    strncpy(sa.sun_path, path, sizeof(sa.sun_path) - 1);
+    if (connect(c->fd, (struct sockaddr *) &sa, sizeof(sa)) == -1) {
         if (errno == EINPROGRESS && !blocking) {
             /* This is ok. */
         } else {
-            if (redisContextWaitReady(c,timeout) != REDIS_OK)
+            if (redisContextWaitReady(c, timeout) != REDIS_OK)
                 return REDIS_ERR;
         }
     }
 
     /* Reset socket to be blocking after connect(2). */
-    if (blocking && redisSetBlocking(c,1) != REDIS_OK)
+    if (blocking && redisSetBlocking(c, 1) != REDIS_OK)
         return REDIS_ERR;
 
     c->flags |= REDIS_CONNECTED;
     return REDIS_OK;
 }
-struct timeval subtractTimeval( struct timeval a, struct timeval b )
-{
-  struct timeval difference;
 
-  difference.tv_sec = a.tv_sec - b.tv_sec;
-  difference.tv_usec = a.tv_usec - b.tv_usec;
+struct timeval subtractTimeval(struct timeval a, struct timeval b) {
+    struct timeval difference;
 
-  if (a.tv_usec < b.tv_usec) {
-    b.tv_sec -= 1L;
-    b.tv_usec += 1000000L;
-  }
+    difference.tv_sec = a.tv_sec - b.tv_sec;
+    difference.tv_usec = a.tv_usec - b.tv_usec;
 
-  return difference;
+    if (a.tv_usec < b.tv_usec) {
+        b.tv_sec -= 1L;
+        b.tv_usec += 1000000L;
+    }
+
+    return difference;
 }
 
-int compareTimeval( struct timeval a, struct timeval b )
-{
-  if (a.tv_sec > b.tv_sec || (a.tv_sec == b.tv_sec && a.tv_usec > b.tv_usec) ) {
-    return 1;
-  } else if( a.tv_sec == b.tv_sec && a.tv_usec == b.tv_usec ) {
-    return 0;
-  } 
-  
-  return -1;
+int compareTimeval(struct timeval a, struct timeval b) {
+    if (a.tv_sec > b.tv_sec || (a.tv_sec == b.tv_sec && a.tv_usec > b.tv_usec)) {
+        return 1;
+    } else if (a.tv_sec == b.tv_sec && a.tv_usec == b.tv_usec) {
+        return 0;
+    }
+
+    return -1;
 }
 

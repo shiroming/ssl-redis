@@ -638,6 +638,7 @@ typedef struct redisServer {
     int cfd[REDIS_BINDADDR_MAX];/* Cluster bus listening socket */
     int cfd_count;              /* Used slots in cfd[] */
     int ssl;
+    char* tls_version;
     char* ssl_root_dir;
     char* ssl_root_file;
     char* ssl_cert_file;

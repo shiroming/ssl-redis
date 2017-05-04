@@ -31,6 +31,7 @@
 
 #ifndef __HIREDIS_H
 #define __HIREDIS_H
+
 #include <stdio.h> /* for size_t */
 #include <stdarg.h> /* for va_list */
 #include <sys/time.h> /* for struct timeval */
@@ -117,11 +118,15 @@ typedef struct redisReadTask {
 } redisReadTask;
 
 typedef struct redisReplyObjectFunctions {
-    void *(*createString)(const redisReadTask*, char*, size_t);
-    void *(*createArray)(const redisReadTask*, int);
-    void *(*createInteger)(const redisReadTask*, long long);
-    void *(*createNil)(const redisReadTask*);
-    void (*freeObject)(void*);
+    void *(*createString)(const redisReadTask *, char *, size_t);
+
+    void *(*createArray)(const redisReadTask *, int);
+
+    void *(*createInteger)(const redisReadTask *, long long);
+
+    void *(*createNil)(const redisReadTask *);
+
+    void (*freeObject)(void *);
 } redisReplyObjectFunctions;
 
 /* State for the protocol parser */
@@ -144,8 +149,11 @@ typedef struct redisReader {
 
 /* Public API for the protocol parser. */
 redisReader *redisReaderCreate(void);
+
 void redisReaderFree(redisReader *r);
+
 int redisReaderFeed(redisReader *r, const char *buf, size_t len);
+
 int redisReaderGetReply(redisReader *r, void **reply);
 
 /* Backwards compatibility, can be removed on big version bump. */
@@ -162,16 +170,18 @@ void freeReplyObject(void *reply);
 
 /* Functions to format a command according to the protocol. */
 int redisvFormatCommand(char **target, const char *format, va_list ap);
+
 int redisFormatCommand(char **target, const char *format, ...);
+
 int redisFormatCommandArgv(char **target, int argc, const char **argv, const size_t *argvlen);
 
 
 typedef struct SSLConnection {
-    SSL_CTX* ctx;    // SSL Context
-    SSL*  ssl;       // SSL object
-    BIO*  bio;       // The SSL BIO class
-    char* conn_str;  // Connection String.
-    int   sd;        // raw client socket.
+    SSL_CTX *ctx;    // SSL Context
+    SSL *ssl;       // SSL object
+    BIO *bio;       // The SSL BIO class
+    char *conn_str;  // Connection String.
+    int sd;        // raw client socket.
 } SSLConnection;
 
 /* Context for a connection to Redis */
@@ -185,19 +195,36 @@ typedef struct redisContext {
     redisReader *reader; /* Protocol reader */
 } redisContext;
 
-redisContext *redisConnect(const char *ip, int port, int ssl, char* certfile, char* certdir);
-redisContext *redisConnectWithTimeout(const char *ip, int port, const struct timeval tv, int ssl, char* certfile, char* certdir);
-redisContext *redisConnectNonBlock(const char *ip, int port, int ssl, char* certfile, char* certdir);
-redisContext *redisConnectBindNonBlock(const char *ip, int port, int ssl, char* certfile, char* certdir, const char *source_addr);
+redisContext *redisConnect(const char *ip, int port, int ssl, char *tlsversion, char *certfile, char *certdir);
+
+redisContext *
+redisConnectWithTimeout(const char *ip, int port, const struct timeval tv, int ssl, char *tlsversion, char *certfile,
+                        char *certdir);
+
+redisContext *redisConnectNonBlock(const char *ip, int port, int ssl, char *tlsversion, char *certfile, char *certdir);
+
+redisContext *
+redisConnectBindNonBlock(const char *ip, int port, int ssl, char *tlsversion, char *certfile, char *certdir,
+                         const char *source_addr);
+
 redisContext *redisConnectUnix(const char *path);
+
 redisContext *redisConnectUnixWithTimeout(const char *path, const struct timeval tv);
+
 redisContext *redisConnectUnixNonBlock(const char *path);
+
 redisContext *redisConnectFd(int fd);
+
 int redisSetTimeout(redisContext *c, const struct timeval tv);
+
 int redisEnableKeepAlive(redisContext *c);
+
 void redisFree(redisContext *c);
+
 int redisFreeKeepFd(redisContext *c);
+
 int redisBufferRead(redisContext *c);
+
 int redisBufferWrite(redisContext *c, int *done);
 
 
@@ -206,6 +233,7 @@ int redisBufferWrite(redisContext *c, int *done);
  * buffer to the socket and reads until it has a reply. In a non-blocking
  * context, it will return unconsumed replies until there are no more. */
 int redisGetReply(redisContext *c, void **reply);
+
 int redisGetReplyFromReader(redisContext *c, void **reply);
 
 /* Write a formatted command to the output buffer. Use these functions in blocking mode
@@ -215,7 +243,9 @@ int redisAppendFormattedCommand(redisContext *c, const char *cmd, size_t len);
 /* Write a command to the output buffer. Use these functions in blocking mode
  * to get a pipeline of commands. */
 int redisvAppendCommand(redisContext *c, const char *format, va_list ap);
+
 int redisAppendCommand(redisContext *c, const char *format, ...);
+
 int redisAppendCommandArgv(redisContext *c, int argc, const char **argv, const size_t *argvlen);
 
 /* Issue a command to Redis. In a blocking context, it is identical to calling
@@ -224,7 +254,9 @@ int redisAppendCommandArgv(redisContext *c, int argc, const char **argv, const s
  * return the reply. In a non-blocking context, it is identical to calling
  * only redisAppendCommand and will always return NULL. */
 void *redisvCommand(redisContext *c, const char *format, va_list ap);
+
 void *redisCommand(redisContext *c, const char *format, ...);
+
 void *redisCommandArgv(redisContext *c, int argc, const char **argv, const size_t *argvlen);
 
 #ifdef __cplusplus

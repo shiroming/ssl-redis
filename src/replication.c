@@ -38,8 +38,11 @@
 #include <sys/stat.h>
 
 void replicationDiscardCachedMaster(void);
+
 void replicationResurrectCachedMaster(int newfd, anetSSLConnection *sslctn);
+
 void replicationSendAck(void);
+
 void putSlaveOnline(redisClient *slave);
 
 /* --------------------------- Utility functions ---------------------------- */
@@ -54,14 +57,14 @@ char *replicationGetSlaveName(redisClient *c) {
 
     ip[0] = '\0';
     buf[0] = '\0';
-    if (anetPeerToString(c->fd,ip,sizeof(ip),NULL) != -1) {
+    if (anetPeerToString(c->fd, ip, sizeof(ip), NULL) != -1) {
         if (c->slave_listening_port)
-            snprintf(buf,sizeof(buf),"%s:%d",ip,c->slave_listening_port);
+            snprintf(buf, sizeof(buf), "%s:%d", ip, c->slave_listening_port);
         else
-            snprintf(buf,sizeof(buf),"%s:<unknown-slave-port>",ip);
+            snprintf(buf, sizeof(buf), "%s:<unknown-slave-port>", ip);
     } else {
-        snprintf(buf,sizeof(buf),"client id #%llu",
-            (unsigned long long) c->id);
+        snprintf(buf, sizeof(buf), "client id #%llu",
+                 (unsigned long long) c->id);
     }
     return buf;
 }
@@ -82,7 +85,7 @@ void createReplicationBacklog(void) {
     /* We don't have any data inside our buffer, but virtually the first
      * byte we have is the next byte that will be generated for the
      * replication stream. */
-    server.repl_backlog_off = server.master_repl_offset+1;
+    server.repl_backlog_off = server.master_repl_offset + 1;
 }
 
 /* This function is called when the user modifies the replication backlog
@@ -108,7 +111,7 @@ void resizeReplicationBacklog(long long newsize) {
         server.repl_backlog_histlen = 0;
         server.repl_backlog_idx = 0;
         /* Next byte we have is... the next since the buffer is empty. */
-        server.repl_backlog_off = server.master_repl_offset+1;
+        server.repl_backlog_off = server.master_repl_offset + 1;
     }
 }
 
@@ -129,10 +132,10 @@ void feedReplicationBacklog(void *ptr, size_t len) {
 
     /* This is a circular buffer, so write as much data we can at every
      * iteration and rewind the "idx" index if we reach the limit. */
-    while(len) {
+    while (len) {
         size_t thislen = server.repl_backlog_size - server.repl_backlog_idx;
         if (thislen > len) thislen = len;
-        memcpy(server.repl_backlog+server.repl_backlog_idx,p,thislen);
+        memcpy(server.repl_backlog + server.repl_backlog_idx, p, thislen);
         server.repl_backlog_idx += thislen;
         if (server.repl_backlog_idx == server.repl_backlog_size)
             server.repl_backlog_idx = 0;
@@ -155,13 +158,13 @@ void feedReplicationBacklogWithObject(robj *o) {
     size_t len;
 
     if (o->encoding == REDIS_ENCODING_INT) {
-        len = ll2string(llstr,sizeof(llstr),(long)o->ptr);
+        len = ll2string(llstr, sizeof(llstr), (long) o->ptr);
         p = llstr;
     } else {
         len = sdslen(o->ptr);
         p = o->ptr;
     }
-    feedReplicationBacklog(p,len);
+    feedReplicationBacklog(p, len);
 }
 
 void replicationFeedSlaves(list *slaves, int dictid, robj **argv, int argc) {
@@ -187,22 +190,22 @@ void replicationFeedSlaves(list *slaves, int dictid, robj **argv, int argc) {
         } else {
             int dictid_len;
 
-            dictid_len = ll2string(llstr,sizeof(llstr),dictid);
+            dictid_len = ll2string(llstr, sizeof(llstr), dictid);
             selectcmd = createObject(REDIS_STRING,
-                sdscatprintf(sdsempty(),
-                "*2\r\n$6\r\nSELECT\r\n$%d\r\n%s\r\n",
-                dictid_len, llstr));
+                                     sdscatprintf(sdsempty(),
+                                                  "*2\r\n$6\r\nSELECT\r\n$%d\r\n%s\r\n",
+                                                  dictid_len, llstr));
         }
 
         /* Add the SELECT command into the backlog. */
         if (server.repl_backlog) feedReplicationBacklogWithObject(selectcmd);
 
         /* Send it to slaves. */
-        listRewind(slaves,&li);
-        while((ln = listNext(&li))) {
+        listRewind(slaves, &li);
+        while ((ln = listNext(&li))) {
             redisClient *slave = ln->value;
             if (slave->replstate == REDIS_REPL_WAIT_BGSAVE_START) continue;
-            addReply(slave,selectcmd);
+            addReply(slave, selectcmd);
         }
 
         if (dictid < 0 || dictid >= REDIS_SHARED_SELECT_CMDS)
@@ -212,14 +215,14 @@ void replicationFeedSlaves(list *slaves, int dictid, robj **argv, int argc) {
 
     /* Write the command to the replication backlog if any. */
     if (server.repl_backlog) {
-        char aux[REDIS_LONGSTR_SIZE+3];
+        char aux[REDIS_LONGSTR_SIZE + 3];
 
         /* Add the multi bulk reply length. */
         aux[0] = '*';
-        len = ll2string(aux+1,sizeof(aux)-1,argc);
-        aux[len+1] = '\r';
-        aux[len+2] = '\n';
-        feedReplicationBacklog(aux,len+3);
+        len = ll2string(aux + 1, sizeof(aux) - 1, argc);
+        aux[len + 1] = '\r';
+        aux[len + 2] = '\n';
+        feedReplicationBacklog(aux, len + 3);
 
         for (j = 0; j < argc; j++) {
             long objlen = stringObjectLen(argv[j]);
@@ -228,18 +231,18 @@ void replicationFeedSlaves(list *slaves, int dictid, robj **argv, int argc) {
              * not just as a plain string, so create the $..CRLF payload len
              * and add the final CRLF */
             aux[0] = '$';
-            len = ll2string(aux+1,sizeof(aux)-1,objlen);
-            aux[len+1] = '\r';
-            aux[len+2] = '\n';
-            feedReplicationBacklog(aux,len+3);
+            len = ll2string(aux + 1, sizeof(aux) - 1, objlen);
+            aux[len + 1] = '\r';
+            aux[len + 2] = '\n';
+            feedReplicationBacklog(aux, len + 3);
             feedReplicationBacklogWithObject(argv[j]);
-            feedReplicationBacklog(aux+len+1,2);
+            feedReplicationBacklog(aux + len + 1, 2);
         }
     }
 
     /* Write the command to every slave. */
-    listRewind(server.slaves,&li);
-    while((ln = listNext(&li))) {
+    listRewind(server.slaves, &li);
+    while ((ln = listNext(&li))) {
         redisClient *slave = ln->value;
 
         /* Don't feed slaves that are still waiting for BGSAVE to start */
@@ -250,12 +253,12 @@ void replicationFeedSlaves(list *slaves, int dictid, robj **argv, int argc) {
          * or are already in sync with the master. */
 
         /* Add the multi bulk length. */
-        addReplyMultiBulkLen(slave,argc);
+        addReplyMultiBulkLen(slave, argc);
 
         /* Finally any additional argument that was not stored inside the
          * static buffer if any (from j to argc). */
         for (j = 0; j < argc; j++)
-            addReplyBulk(slave,argv[j]);
+            addReplyBulk(slave, argv[j]);
     }
 }
 
@@ -267,33 +270,33 @@ void replicationFeedMonitors(redisClient *c, list *monitors, int dictid, robj **
     robj *cmdobj;
     struct timeval tv;
 
-    gettimeofday(&tv,NULL);
-    cmdrepr = sdscatprintf(cmdrepr,"%ld.%06ld ",(long)tv.tv_sec,(long)tv.tv_usec);
+    gettimeofday(&tv, NULL);
+    cmdrepr = sdscatprintf(cmdrepr, "%ld.%06ld ", (long) tv.tv_sec, (long) tv.tv_usec);
     if (c->flags & REDIS_LUA_CLIENT) {
-        cmdrepr = sdscatprintf(cmdrepr,"[%d lua] ",dictid);
+        cmdrepr = sdscatprintf(cmdrepr, "[%d lua] ", dictid);
     } else if (c->flags & REDIS_UNIX_SOCKET) {
-        cmdrepr = sdscatprintf(cmdrepr,"[%d unix:%s] ",dictid,server.unixsocket);
+        cmdrepr = sdscatprintf(cmdrepr, "[%d unix:%s] ", dictid, server.unixsocket);
     } else {
-        cmdrepr = sdscatprintf(cmdrepr,"[%d %s] ",dictid,getClientPeerId(c));
+        cmdrepr = sdscatprintf(cmdrepr, "[%d %s] ", dictid, getClientPeerId(c));
     }
 
     for (j = 0; j < argc; j++) {
         if (argv[j]->encoding == REDIS_ENCODING_INT) {
-            cmdrepr = sdscatprintf(cmdrepr, "\"%ld\"", (long)argv[j]->ptr);
+            cmdrepr = sdscatprintf(cmdrepr, "\"%ld\"", (long) argv[j]->ptr);
         } else {
-            cmdrepr = sdscatrepr(cmdrepr,(char*)argv[j]->ptr,
-                        sdslen(argv[j]->ptr));
+            cmdrepr = sdscatrepr(cmdrepr, (char *) argv[j]->ptr,
+                                 sdslen(argv[j]->ptr));
         }
-        if (j != argc-1)
-            cmdrepr = sdscatlen(cmdrepr," ",1);
+        if (j != argc - 1)
+            cmdrepr = sdscatlen(cmdrepr, " ", 1);
     }
-    cmdrepr = sdscatlen(cmdrepr,"\r\n",2);
-    cmdobj = createObject(REDIS_STRING,cmdrepr);
+    cmdrepr = sdscatlen(cmdrepr, "\r\n", 2);
+    cmdobj = createObject(REDIS_STRING, cmdrepr);
 
-    listRewind(monitors,&li);
-    while((ln = listNext(&li))) {
+    listRewind(monitors, &li);
+    while ((ln = listNext(&li))) {
         redisClient *monitor = ln->value;
-        addReply(monitor,cmdobj);
+        addReply(monitor, cmdobj);
     }
     decrRefCount(cmdobj);
 }
@@ -326,7 +329,7 @@ long long addReplyReplicationBacklog(redisClient *c, long long offset) {
     /* Point j to the oldest byte, that is actaully our
      * server.repl_backlog_off byte. */
     j = (server.repl_backlog_idx +
-        (server.repl_backlog_size-server.repl_backlog_histlen)) %
+         (server.repl_backlog_size - server.repl_backlog_histlen)) %
         server.repl_backlog_size;
     redisLog(REDIS_DEBUG, "[PSYNC] Index of first byte: %lld", j);
 
@@ -337,13 +340,13 @@ long long addReplyReplicationBacklog(redisClient *c, long long offset) {
      * split the reply in two parts if we are cross-boundary. */
     len = server.repl_backlog_histlen - skip;
     redisLog(REDIS_DEBUG, "[PSYNC] Reply total length: %lld", len);
-    while(len) {
+    while (len) {
         long long thislen =
-            ((server.repl_backlog_size - j) < len) ?
-            (server.repl_backlog_size - j) : len;
+                ((server.repl_backlog_size - j) < len) ?
+                (server.repl_backlog_size - j) : len;
 
         redisLog(REDIS_DEBUG, "[PSYNC] addReply() length: %lld", thislen);
-        addReplySds(c,sdsnewlen(server.repl_backlog + j, thislen));
+        addReplySds(c, sdsnewlen(server.repl_backlog + j, thislen));
         len -= thislen;
         j = 0;
     }
@@ -392,30 +395,30 @@ int replicationSetupSlaveForFullResync(redisClient *slave, long long offset) {
     /* Don't send this reply to slaves that approached us with
      * the old SYNC command. */
     if (!(slave->flags & REDIS_PRE_PSYNC)) {
-        buflen = snprintf(buf,sizeof(buf),"+FULLRESYNC %s %lld\r\n",
-                          server.runid,offset);
+        buflen = snprintf(buf, sizeof(buf), "+FULLRESYNC %s %lld\r\n",
+                          server.runid, offset);
 
-        if( slave->ssl.ssl ) {
-        	ssize_t nwritten = SSL_write(slave->ssl.ssl,buf,buflen);
-            if( nwritten != buflen ) {
-            	int errorCode = SSL_get_error( slave->ssl.ssl, nwritten );
-                if( SSL_ERROR_WANT_READ == errorCode || SSL_ERROR_WANT_WRITE == errorCode) {
-                	freeClientAsync(slave);
+        if (slave->ssl.ssl) {
+            ssize_t nwritten = SSL_write(slave->ssl.ssl, buf, buflen);
+            if (nwritten != buflen) {
+                int errorCode = SSL_get_error(slave->ssl.ssl, nwritten);
+                if (SSL_ERROR_WANT_READ == errorCode || SSL_ERROR_WANT_WRITE == errorCode) {
+                    freeClientAsync(slave);
                     return REDIS_ERR;
                 } else {
-                     char error[65535];
-                     ERR_error_string_n(ERR_get_error(), error, 65535);
-                     redisLog( REDIS_WARNING, "replication.c 419: SSL ERROR: %s", error);
-                     freeClientAsync(slave);
-                     return REDIS_ERR;
+                    char error[65535];
+                    ERR_error_string_n(ERR_get_error(), error, 65535);
+                    redisLog(REDIS_WARNING, "replication.c 419: SSL ERROR: %s", error);
+                    freeClientAsync(slave);
+                    return REDIS_ERR;
                 }
             }
         } else {
-        if (write(slave->fd,buf,buflen) != buflen) {
-            freeClientAsync(slave);
-            return REDIS_ERR;
+            if (write(slave->fd, buf, buflen) != buflen) {
+                freeClientAsync(slave);
+                return REDIS_ERR;
+            }
         }
-    }
     }
     return REDIS_OK;
 }
@@ -437,28 +440,30 @@ int masterTryPartialResynchronization(redisClient *c) {
     if (strcasecmp(master_runid, server.runid)) {
         /* Run id "?" is used by slaves that want to force a full resync. */
         if (master_runid[0] != '?') {
-            redisLog(REDIS_NOTICE,"Partial resynchronization not accepted: "
-                "Runid mismatch (Client asked for runid '%s', my runid is '%s')",
-                master_runid, server.runid);
+            redisLog(REDIS_NOTICE, "Partial resynchronization not accepted: "
+                             "Runid mismatch (Client asked for runid '%s', my runid is '%s')",
+                     master_runid, server.runid);
         } else {
-            redisLog(REDIS_NOTICE,"Full resync requested by slave %s",
-                replicationGetSlaveName(c));
+            redisLog(REDIS_NOTICE, "Full resync requested by slave %s",
+                     replicationGetSlaveName(c));
         }
         goto need_full_resync;
     }
 
     /* We still have the data our slave is asking for? */
-    if (getLongLongFromObjectOrReply(c,c->argv[2],&psync_offset,NULL) !=
-       REDIS_OK) goto need_full_resync;
+    if (getLongLongFromObjectOrReply(c, c->argv[2], &psync_offset, NULL) !=
+        REDIS_OK)
+        goto need_full_resync;
     if (!server.repl_backlog ||
         psync_offset < server.repl_backlog_off ||
-        psync_offset > (server.repl_backlog_off + server.repl_backlog_histlen))
-    {
+        psync_offset > (server.repl_backlog_off + server.repl_backlog_histlen)) {
         redisLog(REDIS_NOTICE,
-            "Unable to partial resync with slave %s for lack of backlog (Slave request was: %lld).", replicationGetSlaveName(c), psync_offset);
+                 "Unable to partial resync with slave %s for lack of backlog (Slave request was: %lld).",
+                 replicationGetSlaveName(c), psync_offset);
         if (psync_offset > server.master_repl_offset) {
             redisLog(REDIS_WARNING,
-                "Warning: slave %s tried to PSYNC with an offset that is greater than the master replication offset.", replicationGetSlaveName(c));
+                     "Warning: slave %s tried to PSYNC with an offset that is greater than the master replication offset.",
+                     replicationGetSlaveName(c));
         }
         goto need_full_resync;
     }
@@ -471,38 +476,38 @@ int masterTryPartialResynchronization(redisClient *c) {
     c->replstate = REDIS_REPL_ONLINE;
     c->repl_ack_time = server.unixtime;
     c->repl_put_online_on_ack = 0;
-    listAddNodeTail(server.slaves,c);
+    listAddNodeTail(server.slaves, c);
     /* We can't use the connection buffers since they are used to accumulate
      * new commands at this stage. But we are sure the socket send buffer is
      * empty so this write will never fail actually. */
-    buflen = snprintf(buf,sizeof(buf),"+CONTINUE\r\n");
-    
-    if( c->ssl.ssl ) {
-    	ssize_t nwritten = SSL_write(c->ssl.ssl,buf,buflen);
-        if( nwritten != buflen ) {
-        	int errorCode = SSL_get_error( c->ssl.ssl, nwritten );
-            if( SSL_ERROR_WANT_READ == errorCode || SSL_ERROR_WANT_WRITE == errorCode) {
-            	freeClientAsync(c);
+    buflen = snprintf(buf, sizeof(buf), "+CONTINUE\r\n");
+
+    if (c->ssl.ssl) {
+        ssize_t nwritten = SSL_write(c->ssl.ssl, buf, buflen);
+        if (nwritten != buflen) {
+            int errorCode = SSL_get_error(c->ssl.ssl, nwritten);
+            if (SSL_ERROR_WANT_READ == errorCode || SSL_ERROR_WANT_WRITE == errorCode) {
+                freeClientAsync(c);
                 return REDIS_OK;
             } else {
-                 char error[65535];
-                 ERR_error_string_n(ERR_get_error(), error, 65535);
-                 redisLog( REDIS_WARNING, "replication.c 419: SSL ERROR: %s", error);
-                 freeClientAsync(c);
-                 return REDIS_OK;
+                char error[65535];
+                ERR_error_string_n(ERR_get_error(), error, 65535);
+                redisLog(REDIS_WARNING, "replication.c 419: SSL ERROR: %s", error);
+                freeClientAsync(c);
+                return REDIS_OK;
             }
         }
     } else {
-    	if (write(c->fd,buf,buflen) != buflen) {
-    	    freeClientAsync(c);
-    	    return REDIS_OK;
-    	}
+        if (write(c->fd, buf, buflen) != buflen) {
+            freeClientAsync(c);
+            return REDIS_OK;
+        }
     }
-    psync_len = addReplyReplicationBacklog(c,psync_offset);
+    psync_len = addReplyReplicationBacklog(c, psync_offset);
     redisLog(REDIS_NOTICE,
-        "Partial resynchronization request from %s accepted. Sending %lld bytes of backlog starting from offset %lld.",
-            replicationGetSlaveName(c),
-            psync_len, psync_offset);
+             "Partial resynchronization request from %s accepted. Sending %lld bytes of backlog starting from offset %lld.",
+             replicationGetSlaveName(c),
+             psync_len, psync_offset);
     /* Note that we don't need to set the selected DB at server.slaveseldb
      * to -1 to force the master to emit SELECT, since the slave already
      * has this state from the previous connection with the master. */
@@ -510,11 +515,11 @@ int masterTryPartialResynchronization(redisClient *c) {
     refreshGoodSlavesCount();
     return REDIS_OK; /* The caller can return, no full resync needed. */
 
-need_full_resync:
- /* We need a full resync for some reason... Note that we can't
-     * reply to PSYNC right now if a full SYNC is needed. The reply
-     * must include the master offset at the time the RDB file we transfer
-     * is generated, so we need to delay the reply to that moment. */
+    need_full_resync:
+    /* We need a full resync for some reason... Note that we can't
+        * reply to PSYNC right now if a full SYNC is needed. The reply
+        * must include the master offset at the time the RDB file we transfer
+        * is generated, so we need to delay the reply to that moment. */
     return REDIS_ERR;
 }
 
@@ -542,8 +547,8 @@ int startBgsaveForReplication(int mincapa) {
     listIter li;
     listNode *ln;
 
-    redisLog(REDIS_NOTICE,"Starting BGSAVE for SYNC with target: %s",
-        socket_target ? "slaves sockets" : "disk");
+    redisLog(REDIS_NOTICE, "Starting BGSAVE for SYNC with target: %s",
+             socket_target ? "slaves sockets" : "disk");
 
     if (socket_target)
         retval = rdbSaveToSlavesSockets();
@@ -554,16 +559,16 @@ int startBgsaveForReplication(int mincapa) {
      * resynchorinization from the list of salves, inform them with
      * an error about what happened, close the connection ASAP. */
     if (retval == REDIS_ERR) {
-        redisLog(REDIS_WARNING,"BGSAVE for replication failed");
-        listRewind(server.slaves,&li);
-        while((ln = listNext(&li))) {
+        redisLog(REDIS_WARNING, "BGSAVE for replication failed");
+        listRewind(server.slaves, &li);
+        while ((ln = listNext(&li))) {
             redisClient *slave = ln->value;
 
             if (slave->replstate == REDIS_REPL_WAIT_BGSAVE_START) {
                 slave->flags &= ~REDIS_SLAVE;
-                listDelNode(server.slaves,ln);
+                listDelNode(server.slaves, ln);
                 addReplyError(slave,
-                    "BGSAVE failed, replication can't continue");
+                              "BGSAVE failed, replication can't continue");
                 slave->flags |= REDIS_CLOSE_AFTER_REPLY;
             }
         }
@@ -573,13 +578,13 @@ int startBgsaveForReplication(int mincapa) {
     /* If the target is socket, rdbSaveToSlavesSockets() already setup
      * the salves for a full resync. Otherwise for disk target do it now.*/
     if (!socket_target) {
-        listRewind(server.slaves,&li);
-        while((ln = listNext(&li))) {
+        listRewind(server.slaves, &li);
+        while ((ln = listNext(&li))) {
             redisClient *slave = ln->value;
 
             if (slave->replstate == REDIS_REPL_WAIT_BGSAVE_START) {
-                    replicationSetupSlaveForFullResync(slave,
-                            getPsyncInitialOffset());
+                replicationSetupSlaveForFullResync(slave,
+                                                   getPsyncInitialOffset());
             }
         }
     }
@@ -598,7 +603,7 @@ void syncCommand(redisClient *c) {
     /* Refuse SYNC requests if we are a slave but the link with our master
      * is not ok... */
     if (server.masterhost && server.repl_state != REDIS_REPL_CONNECTED) {
-        addReplyError(c,"Can't SYNC while not connected with my master");
+        addReplyError(c, "Can't SYNC while not connected with my master");
         return;
     }
 
@@ -607,12 +612,12 @@ void syncCommand(redisClient *c) {
      * buffer registering the differences between the BGSAVE and the current
      * dataset, so that we can copy to other slaves if needed. */
     if (listLength(c->reply) != 0 || c->bufpos != 0) {
-        addReplyError(c,"SYNC and PSYNC are invalid with pending output");
+        addReplyError(c, "SYNC and PSYNC are invalid with pending output");
         return;
     }
 
-    redisLog(REDIS_NOTICE,"Slave %s asks for synchronization",
-        replicationGetSlaveName(c));
+    redisLog(REDIS_NOTICE, "Slave %s asks for synchronization",
+             replicationGetSlaveName(c));
 
     /* Try a partial resynchronization if this is a PSYNC command.
      * If it fails, we continue with usual full resynchronization, however
@@ -623,7 +628,7 @@ void syncCommand(redisClient *c) {
      *
      * So the slave knows the new runid and offset to try a PSYNC later
      * if the connection with the master is lost. */
-    if (!strcasecmp(c->argv[0]->ptr,"psync")) {
+    if (!strcasecmp(c->argv[0]->ptr, "psync")) {
         if (masterTryPartialResynchronization(c) == REDIS_OK) {
             server.stat_sync_partial_ok++;
             return; /* No full resync needed, return. */
@@ -653,12 +658,11 @@ void syncCommand(redisClient *c) {
         anetDisableTcpNoDelay(NULL, c->fd); /* Non critical if it fails. */
     c->repldbfd = -1;
     c->flags |= REDIS_SLAVE;
-    listAddNodeTail(server.slaves,c);
+    listAddNodeTail(server.slaves, c);
 
     /* CASE 1: BGSAVE is in progress, with disk target. */
     if (server.rdb_child_pid != -1 &&
-        server.rdb_child_type == REDIS_RDB_CHILD_TYPE_DISK)
-    {
+        server.rdb_child_type == REDIS_RDB_CHILD_TYPE_DISK) {
         /* Ok a background save is in progress. Let's check if it is a good
          * one for replication, i.e. if there is another slave that is
          * registering differences since the server forked to save. */
@@ -666,8 +670,8 @@ void syncCommand(redisClient *c) {
         listNode *ln;
         listIter li;
 
-        listRewind(server.slaves,&li);
-        while((ln = listNext(&li))) {
+        listRewind(server.slaves, &li);
+        while ((ln = listNext(&li))) {
             slave = ln->value;
             if (slave->replstate == REDIS_REPL_WAIT_BGSAVE_END) break;
         }
@@ -676,32 +680,31 @@ void syncCommand(redisClient *c) {
         if (ln && ((c->slave_capa & slave->slave_capa) == slave->slave_capa)) {
             /* Perfect, the server is already registering differences for
              * another slave. Set the right state, and copy the buffer. */
-            copyClientOutputBuffer(c,slave);
-            replicationSetupSlaveForFullResync(c,slave->psync_initial_offset);
-            redisLog(REDIS_NOTICE,"Waiting for end of BGSAVE for SYNC");
+            copyClientOutputBuffer(c, slave);
+            replicationSetupSlaveForFullResync(c, slave->psync_initial_offset);
+            redisLog(REDIS_NOTICE, "Waiting for end of BGSAVE for SYNC");
         } else {
             /* No way, we need to wait for the next BGSAVE in order to
              * register differences. */
-            redisLog(REDIS_NOTICE,"Waiting for next BGSAVE for SYNC");
+            redisLog(REDIS_NOTICE, "Waiting for next BGSAVE for SYNC");
         }
 
-    /* CASE 2: BGSAVE is in progress, with socket target. */
+        /* CASE 2: BGSAVE is in progress, with socket target. */
     } else if (server.rdb_child_pid != -1 &&
-               server.rdb_child_type == REDIS_RDB_CHILD_TYPE_SOCKET)
-    {
+               server.rdb_child_type == REDIS_RDB_CHILD_TYPE_SOCKET) {
         /* There is an RDB child process but it is writing directly to
          * children sockets. We need to wait for the next BGSAVE
          * in order to synchronize. */
-        redisLog(REDIS_NOTICE,"Waiting for next BGSAVE for SYNC");
+        redisLog(REDIS_NOTICE, "Waiting for next BGSAVE for SYNC");
 
-    /* CASE 3: There is no BGSAVE is progress. */
+        /* CASE 3: There is no BGSAVE is progress. */
     } else {
         if (server.repl_diskless_sync && (c->slave_capa & SLAVE_CAPA_EOF)) {
             /* Diskless replication RDB child is created inside
              * replicationCron() since we want to delay its start a
              * few seconds to wait for more slaves to arrive. */
             if (server.repl_diskless_sync_delay)
-                redisLog(REDIS_NOTICE,"Delay next BGSAVE for SYNC");
+                redisLog(REDIS_NOTICE, "Delay next BGSAVE for SYNC");
         } else {
             /* Target is disk (or the slave is not capable of supporting
              * diskless replication) and we don't have a BGSAVE in progress,
@@ -733,31 +736,31 @@ void replconfCommand(redisClient *c) {
     if ((c->argc % 2) == 0) {
         /* Number of arguments must be odd to make sure that every
          * option has a corresponding value. */
-        addReply(c,shared.syntaxerr);
+        addReply(c, shared.syntaxerr);
         return;
     }
 
     /* Process every option-value pair. */
-    for (j = 1; j < c->argc; j+=2) {
-        if (!strcasecmp(c->argv[j]->ptr,"listening-port")) {
+    for (j = 1; j < c->argc; j += 2) {
+        if (!strcasecmp(c->argv[j]->ptr, "listening-port")) {
             long port;
 
-            if ((getLongFromObjectOrReply(c,c->argv[j+1],
-                    &port,NULL) != REDIS_OK))
+            if ((getLongFromObjectOrReply(c, c->argv[j + 1],
+                                          &port, NULL) != REDIS_OK))
                 return;
             c->slave_listening_port = port;
-        } else if (!strcasecmp(c->argv[j]->ptr,"capa")) {
+        } else if (!strcasecmp(c->argv[j]->ptr, "capa")) {
             /* Ignore capabilities not understood by this master. */
-            if (!strcasecmp(c->argv[j+1]->ptr,"eof"))
+            if (!strcasecmp(c->argv[j + 1]->ptr, "eof"))
                 c->slave_capa |= SLAVE_CAPA_EOF;
-        } else if (!strcasecmp(c->argv[j]->ptr,"ack")) {
+        } else if (!strcasecmp(c->argv[j]->ptr, "ack")) {
             /* REPLCONF ACK is used by slave to inform the master the amount
              * of replication stream that it processed so far. It is an
              * internal only command that normal clients should never use. */
             long long offset;
 
             if (!(c->flags & REDIS_SLAVE)) return;
-            if ((getLongLongFromObject(c->argv[j+1], &offset) != REDIS_OK))
+            if ((getLongLongFromObject(c->argv[j + 1], &offset) != REDIS_OK))
                 return;
             if (offset > c->repl_ack_off)
                 c->repl_ack_off = offset;
@@ -769,18 +772,18 @@ void replconfCommand(redisClient *c) {
                 putSlaveOnline(c);
             /* Note: this command does not reply anything! */
             return;
-        } else if (!strcasecmp(c->argv[j]->ptr,"getack")) {
+        } else if (!strcasecmp(c->argv[j]->ptr, "getack")) {
             /* REPLCONF GETACK is used in order to request an ACK ASAP
              * to the slave. */
             if (server.masterhost && server.master) replicationSendAck();
             /* Note: this command does not reply anything! */
         } else {
-            addReplyErrorFormat(c,"Unrecognized REPLCONF option: %s",
-                (char*)c->argv[j]->ptr);
+            addReplyErrorFormat(c, "Unrecognized REPLCONF option: %s",
+                                (char *) c->argv[j]->ptr);
             return;
         }
     }
-    addReply(c,shared.ok);
+    addReply(c, shared.ok);
 }
 
 /* This function puts a slave in the online state, and should be called just
@@ -800,14 +803,14 @@ void putSlaveOnline(redisClient *slave) {
     slave->repl_put_online_on_ack = 0;
     slave->repl_ack_time = server.unixtime; /* Prevent false timeout. */
     if (aeCreateFileEvent(server.el, slave->fd, AE_WRITABLE,
-        sendReplyToClient, slave,1) == AE_ERR) {
-        redisLog(REDIS_WARNING,"Unable to register writable event for slave bulk transfer: %s", strerror(errno));
+                          sendReplyToClient, slave, 1) == AE_ERR) {
+        redisLog(REDIS_WARNING, "Unable to register writable event for slave bulk transfer: %s", strerror(errno));
         freeClient(slave);
         return;
     }
     refreshGoodSlavesCount();
-    redisLog(REDIS_NOTICE,"Synchronization with slave %s succeeded",
-        replicationGetSlaveName(slave));
+    redisLog(REDIS_NOTICE, "Synchronization with slave %s succeeded",
+             replicationGetSlaveName(slave));
 }
 
 void sendBulkToSlave(aeEventLoop *el, int fd, void *privdata, int mask) {
@@ -822,30 +825,30 @@ void sendBulkToSlave(aeEventLoop *el, int fd, void *privdata, int mask) {
      * the file in the form "$<length>\r\n". */
     if (slave->replpreamble) {
         nwritten = 0;
-        if( slave->ssl.ssl != NULL ) {
-          nwritten = SSL_write(slave->ssl.ssl,slave->replpreamble,sdslen(slave->replpreamble));
-          if( nwritten < 0 ) {
-            int errorCode = SSL_get_error( slave->ssl.ssl, nwritten );
-            if( SSL_ERROR_WANT_READ == errorCode || SSL_ERROR_WANT_WRITE == errorCode) {
-              nwritten = 0;
-            } else {
-              char error[65535];
-              ERR_error_string_n(ERR_get_error(), error, 65535);
-              redisLog( REDIS_WARNING, "replication.c 734: SSL ERROR: %s", error);
+        if (slave->ssl.ssl != NULL) {
+            nwritten = SSL_write(slave->ssl.ssl, slave->replpreamble, sdslen(slave->replpreamble));
+            if (nwritten < 0) {
+                int errorCode = SSL_get_error(slave->ssl.ssl, nwritten);
+                if (SSL_ERROR_WANT_READ == errorCode || SSL_ERROR_WANT_WRITE == errorCode) {
+                    nwritten = 0;
+                } else {
+                    char error[65535];
+                    ERR_error_string_n(ERR_get_error(), error, 65535);
+                    redisLog(REDIS_WARNING, "replication.c 734: SSL ERROR: %s", error);
+                }
             }
-          }
         } else {
-          nwritten = write(fd,slave->replpreamble,sdslen(slave->replpreamble));
+            nwritten = write(fd, slave->replpreamble, sdslen(slave->replpreamble));
         }
         if (nwritten == -1) {
-            redisLog(REDIS_VERBOSE,"Write error sending RDB preamble to slave: %s",
-                strerror(errno));
-          freeClient(slave);
-          return;
+            redisLog(REDIS_VERBOSE, "Write error sending RDB preamble to slave: %s",
+                     strerror(errno));
+            freeClient(slave);
+            return;
         }
-   
+
         server.stat_net_output_bytes += nwritten;
-        sdsrange(slave->replpreamble,nwritten,-1);
+        sdsrange(slave->replpreamble, nwritten, -1);
         if (sdslen(slave->replpreamble) == 0) {
             sdsfree(slave->replpreamble);
             slave->replpreamble = NULL;
@@ -856,37 +859,37 @@ void sendBulkToSlave(aeEventLoop *el, int fd, void *privdata, int mask) {
     }
 
     /* If the preamble was already transfered, send the RDB bulk data. */
-    lseek(slave->repldbfd,slave->repldboff,SEEK_SET);
-    buflen = read(slave->repldbfd,buf,REDIS_IOBUF_LEN);
+    lseek(slave->repldbfd, slave->repldboff, SEEK_SET);
+    buflen = read(slave->repldbfd, buf, REDIS_IOBUF_LEN);
     if (buflen <= 0) {
-        redisLog(REDIS_WARNING,"Read error sending DB to slave: %s",
-            (buflen == 0) ? "premature EOF" : strerror(errno));
+        redisLog(REDIS_WARNING, "Read error sending DB to slave: %s",
+                 (buflen == 0) ? "premature EOF" : strerror(errno));
         freeClient(slave);
         return;
     }
-    
+
     nwritten = 0;
-    if( slave->ssl.ssl != NULL ) {
-        nwritten = SSL_write(slave->ssl.ssl,buf,buflen);
-        if( nwritten < 0 ) {
-            int errorCode = SSL_get_error( slave->ssl.ssl, nwritten );
-            redisLog( REDIS_WARNING, "replication.c 772 SSL NWRITTEN < 0");
-            if( SSL_ERROR_WANT_READ == errorCode || SSL_ERROR_WANT_WRITE == errorCode) {
-            	redisLog( REDIS_WARNING, "replication.c 774 errorCode = %d", errorCode);
-            	nwritten = 0;
+    if (slave->ssl.ssl != NULL) {
+        nwritten = SSL_write(slave->ssl.ssl, buf, buflen);
+        if (nwritten < 0) {
+            int errorCode = SSL_get_error(slave->ssl.ssl, nwritten);
+            redisLog(REDIS_WARNING, "replication.c 772 SSL NWRITTEN < 0");
+            if (SSL_ERROR_WANT_READ == errorCode || SSL_ERROR_WANT_WRITE == errorCode) {
+                redisLog(REDIS_WARNING, "replication.c 774 errorCode = %d", errorCode);
+                nwritten = 0;
             } else {
-            	char error[65535];
-            	ERR_error_string_n(ERR_get_error(), error, 65535);
-            	redisLog( REDIS_WARNING, "replication.c 777 SSL ERROR: %s", error);
-            	return;
+                char error[65535];
+                ERR_error_string_n(ERR_get_error(), error, 65535);
+                redisLog(REDIS_WARNING, "replication.c 777 SSL ERROR: %s", error);
+                return;
             }
         }
     } else {
-        nwritten = write(fd,buf,buflen);
-        if(nwritten == -1) {
+        nwritten = write(fd, buf, buflen);
+        if (nwritten == -1) {
             if (errno != EAGAIN) {
-                redisLog(REDIS_WARNING,"Write error sending DB to slave: %s",
-                strerror(errno));
+                redisLog(REDIS_WARNING, "Write error sending DB to slave: %s",
+                         strerror(errno));
             }
             return;
         }
@@ -897,7 +900,7 @@ void sendBulkToSlave(aeEventLoop *el, int fd, void *privdata, int mask) {
     if (slave->repldboff == slave->repldbsize) {
         close(slave->repldbfd);
         slave->repldbfd = -1;
-        aeDeleteFileEvent(server.el,slave->fd,AE_WRITABLE);
+        aeDeleteFileEvent(server.el, slave->fd, AE_WRITABLE);
         putSlaveOnline(slave);
     }
 }
@@ -922,14 +925,14 @@ void updateSlavesWaitingBgsave(int bgsaveerr, int type) {
     int mincapa = -1;
     listIter li;
 
-    listRewind(server.slaves,&li);
-    while((ln = listNext(&li))) {
+    listRewind(server.slaves, &li);
+    while ((ln = listNext(&li))) {
         redisClient *slave = ln->value;
 
         if (slave->replstate == REDIS_REPL_WAIT_BGSAVE_START) {
             startbgsave = 1;
             mincapa = (mincapa == -1) ? slave->slave_capa :
-                                        (mincapa & slave->slave_capa);
+                      (mincapa & slave->slave_capa);
         } else if (slave->replstate == REDIS_REPL_WAIT_BGSAVE_END) {
             struct redis_stat buf;
 
@@ -940,8 +943,8 @@ void updateSlavesWaitingBgsave(int bgsaveerr, int type) {
              * the slave online. */
             if (type == REDIS_RDB_CHILD_TYPE_SOCKET) {
                 redisLog(REDIS_NOTICE,
-                    "Streamed RDB transfer with slave %s succeeded (socket). Waiting for REPLCONF ACK from slave to enable streaming",
-                        replicationGetSlaveName(slave));
+                         "Streamed RDB transfer with slave %s succeeded (socket). Waiting for REPLCONF ACK from slave to enable streaming",
+                         replicationGetSlaveName(slave));
                 /* Note: we wait for a REPLCONF ACK message from slave in
                  * order to really put it online (install the write handler
                  * so that the accumulated data can be transfered). However
@@ -953,23 +956,23 @@ void updateSlavesWaitingBgsave(int bgsaveerr, int type) {
             } else {
                 if (bgsaveerr != REDIS_OK) {
                     freeClient(slave);
-                    redisLog(REDIS_WARNING,"SYNC failed. BGSAVE child returned an error");
+                    redisLog(REDIS_WARNING, "SYNC failed. BGSAVE child returned an error");
                     continue;
                 }
-                if ((slave->repldbfd = open(server.rdb_filename,O_RDONLY)) == -1 ||
-                    redis_fstat(slave->repldbfd,&buf) == -1) {
+                if ((slave->repldbfd = open(server.rdb_filename, O_RDONLY)) == -1 ||
+                    redis_fstat(slave->repldbfd, &buf) == -1) {
                     freeClient(slave);
-                    redisLog(REDIS_WARNING,"SYNC failed. Can't open/stat DB after BGSAVE: %s", strerror(errno));
+                    redisLog(REDIS_WARNING, "SYNC failed. Can't open/stat DB after BGSAVE: %s", strerror(errno));
                     continue;
                 }
                 slave->repldboff = 0;
                 slave->repldbsize = buf.st_size;
                 slave->replstate = REDIS_REPL_SEND_BULK;
-                slave->replpreamble = sdscatprintf(sdsempty(),"$%lld\r\n",
-                    (unsigned long long) slave->repldbsize);
+                slave->replpreamble = sdscatprintf(sdsempty(), "$%lld\r\n",
+                                                   (unsigned long long) slave->repldbsize);
 
-                aeDeleteFileEvent(server.el,slave->fd,AE_WRITABLE);
-                if (aeCreateFileEvent(server.el, slave->fd, AE_WRITABLE, sendBulkToSlave, slave,1) == AE_ERR) {
+                aeDeleteFileEvent(server.el, slave->fd, AE_WRITABLE);
+                if (aeCreateFileEvent(server.el, slave->fd, AE_WRITABLE, sendBulkToSlave, slave, 1) == AE_ERR) {
                     freeClient(slave);
                     continue;
                 }
@@ -992,8 +995,8 @@ int slaveIsInHandshakeState(void) {
 void replicationAbortSyncTransfer(void) {
     redisAssert(server.repl_state == REDIS_REPL_TRANSFER);
 
-    aeDeleteFileEvent(server.el,server.repl_transfer_s,AE_READABLE);
-    anetCleanupSSL( &(server.repl_transfer_ssl ) );
+    aeDeleteFileEvent(server.el, server.repl_transfer_s, AE_READABLE);
+    anetCleanupSSL(&(server.repl_transfer_ssl));
     close(server.repl_transfer_s);
     close(server.repl_transfer_fd);
     unlink(server.repl_transfer_tmpfile);
@@ -1012,24 +1015,25 @@ void replicationAbortSyncTransfer(void) {
 void replicationSendNewlineToMaster(void) {
     static time_t newline_sent;
     if (time(NULL) != newline_sent) {
-        newline_sent = time(NULL);        
-        if( server.repl_transfer_ssl.ssl != NULL ) {
-        	ssize_t nwritten = SSL_write(server.repl_transfer_ssl.ssl,"\n",1);
-            if( nwritten != 1 ) {
-            	int errorCode = SSL_get_error( server.repl_transfer_ssl.ssl, nwritten );
-                if( SSL_ERROR_WANT_READ == errorCode || SSL_ERROR_WANT_WRITE == errorCode) {
+        newline_sent = time(NULL);
+        if (server.repl_transfer_ssl.ssl != NULL) {
+            ssize_t nwritten = SSL_write(server.repl_transfer_ssl.ssl, "\n", 1);
+            if (nwritten != 1) {
+                int errorCode = SSL_get_error(server.repl_transfer_ssl.ssl, nwritten);
+                if (SSL_ERROR_WANT_READ == errorCode || SSL_ERROR_WANT_WRITE == errorCode) {
                     // do nothing...
                 } else {
-                     char error[65535];
-                     ERR_error_string_n(ERR_get_error(), error, 65535);
-                     redisLog( REDIS_WARNING, "replication.c 934: SSL ERROR: %s", error);
+                    char error[65535];
+                    ERR_error_string_n(ERR_get_error(), error, 65535);
+                    redisLog(REDIS_WARNING, "replication.c 934: SSL ERROR: %s", error);
                 }
             }
         } else {
-            if (write(server.repl_transfer_s,"\n",1) == -1) {
+            if (write(server.repl_transfer_s, "\n", 1) == -1) {
                 /* Pinging back in this stage is best-effort. */
             }
-        }        newline_sent = time(NULL);
+        }
+        newline_sent = time(NULL);
     }
 }
 
@@ -1042,6 +1046,7 @@ void replicationEmptyDbCallback(void *privdata) {
 
 /* Asynchronously read the SYNC payload we receive from a master */
 #define REPL_MAX_WRITTEN_BEFORE_FSYNC (1024*1024*8) /* 8 MB */
+
 void readSyncBulkPayload(aeEventLoop *el, int fd, void *privdata, int mask) {
     char buf[4096];
     ssize_t nread, readlen;
@@ -1059,17 +1064,17 @@ void readSyncBulkPayload(aeEventLoop *el, int fd, void *privdata, int mask) {
     /* If repl_transfer_size == -1 we still have to read the bulk length
      * from the master reply. */
     if (server.repl_transfer_size == -1) {
-        if (syncReadLine(fd,server.repl_transfer_ssl.ssl,buf,1024,server.repl_syncio_timeout*1000) == -1) {
+        if (syncReadLine(fd, server.repl_transfer_ssl.ssl, buf, 1024, server.repl_syncio_timeout * 1000) == -1) {
             redisLog(REDIS_WARNING,
-                "I/O error reading bulk count from MASTER: %s",
-                strerror(errno));
+                     "I/O error reading bulk count from MASTER: %s",
+                     strerror(errno));
             goto error;
         }
 
         if (buf[0] == '-') {
             redisLog(REDIS_WARNING,
-                "MASTER aborted replication with an error: %s",
-                buf+1);
+                     "MASTER aborted replication with an error: %s",
+                     buf + 1);
             goto error;
         } else if (buf[0] == '\0') {
             /* At this stage just a newline works as a PING in order to take
@@ -1078,7 +1083,9 @@ void readSyncBulkPayload(aeEventLoop *el, int fd, void *privdata, int mask) {
             server.repl_transfer_lastio = server.unixtime;
             return;
         } else if (buf[0] != '$') {
-            redisLog(REDIS_WARNING,"Bad protocol from MASTER, the first byte is not '$' (we received '%s'), are you sure the host and port are right?", buf);
+            redisLog(REDIS_WARNING,
+                     "Bad protocol from MASTER, the first byte is not '$' (we received '%s'), are you sure the host and port are right?",
+                     buf);
             goto error;
         }
 
@@ -1092,21 +1099,21 @@ void readSyncBulkPayload(aeEventLoop *el, int fd, void *privdata, int mask) {
          * At the end of the file the announced delimiter is transmitted. The
          * delimiter is long and random enough that the probability of a
          * collision with the actual file content can be ignored. */
-        if (strncmp(buf+1,"EOF:",4) == 0 && strlen(buf+5) >= REDIS_RUN_ID_SIZE) {
+        if (strncmp(buf + 1, "EOF:", 4) == 0 && strlen(buf + 5) >= REDIS_RUN_ID_SIZE) {
             usemark = 1;
-            memcpy(eofmark,buf+5,REDIS_RUN_ID_SIZE);
-            memset(lastbytes,0,REDIS_RUN_ID_SIZE);
+            memcpy(eofmark, buf + 5, REDIS_RUN_ID_SIZE);
+            memset(lastbytes, 0, REDIS_RUN_ID_SIZE);
             /* Set any repl_transfer_size to avoid entering this code path
              * at the next call. */
             server.repl_transfer_size = 0;
             redisLog(REDIS_NOTICE,
-                "MASTER <-> SLAVE sync: receiving streamed RDB from master");
+                     "MASTER <-> SLAVE sync: receiving streamed RDB from master");
         } else {
             usemark = 0;
-            server.repl_transfer_size = strtol(buf+1,NULL,10);
+            server.repl_transfer_size = strtol(buf + 1, NULL, 10);
             redisLog(REDIS_NOTICE,
-                "MASTER <-> SLAVE sync: receiving %lld bytes from master",
-                (long long) server.repl_transfer_size);
+                     "MASTER <-> SLAVE sync: receiving %lld bytes from master",
+                     (long long) server.repl_transfer_size);
         }
         return;
     }
@@ -1116,37 +1123,38 @@ void readSyncBulkPayload(aeEventLoop *el, int fd, void *privdata, int mask) {
         readlen = sizeof(buf);
     } else {
         left = server.repl_transfer_size - server.repl_transfer_read;
-        readlen = (left < (signed)sizeof(buf)) ? left : (signed)sizeof(buf);
+        readlen = (left < (signed) sizeof(buf)) ? left : (signed) sizeof(buf);
     }
-    
-    if( server.repl_transfer_ssl.ssl ) {
-      nread = SSL_read(server.repl_transfer_ssl.ssl, buf, readlen);
-      if( nread <= 0 ) {
-        int errorCode = SSL_get_error( server.repl_transfer_ssl.ssl, nread );
-        if( SSL_ERROR_WANT_READ == errorCode || SSL_ERROR_WANT_WRITE == errorCode) {
-          nread = 0;
-        } else {
-          int error_nbr = ERR_get_error();
 
-          if( error_nbr != 0 ) {
-            char error[65535];
-            ERR_error_string_n(error_nbr, error, 65535);
-            redisLog( REDIS_WARNING, "replication.c 1043: SSL ERROR: %s", error);
-          }
-
-          if( nread == 0 && error_nbr == 0 ) {
-            redisLog(REDIS_WARNING, "Client closed connection while trying to sync with MASTER");
-          } else {
-            redisLog(REDIS_WARNING, "Error reading from client while trying to sync with MASTER: %s",strerror(errno));
-          }
-        }
-      }
-    } else {
-	nread = read(fd,buf,readlen);
+    if (server.repl_transfer_ssl.ssl) {
+        nread = SSL_read(server.repl_transfer_ssl.ssl, buf, readlen);
         if (nread <= 0) {
-        redisLog(REDIS_WARNING,"I/O error trying to sync with MASTER: %s",
-                 (nread == -1) ? strerror(errno) : "connection lost");
-      }
+            int errorCode = SSL_get_error(server.repl_transfer_ssl.ssl, nread);
+            if (SSL_ERROR_WANT_READ == errorCode || SSL_ERROR_WANT_WRITE == errorCode) {
+                nread = 0;
+            } else {
+                int error_nbr = ERR_get_error();
+
+                if (error_nbr != 0) {
+                    char error[65535];
+                    ERR_error_string_n(error_nbr, error, 65535);
+                    redisLog(REDIS_WARNING, "replication.c 1043: SSL ERROR: %s", error);
+                }
+
+                if (nread == 0 && error_nbr == 0) {
+                    redisLog(REDIS_WARNING, "Client closed connection while trying to sync with MASTER");
+                } else {
+                    redisLog(REDIS_WARNING, "Error reading from client while trying to sync with MASTER: %s",
+                             strerror(errno));
+                }
+            }
+        }
+    } else {
+        nread = read(fd, buf, readlen);
+        if (nread <= 0) {
+            redisLog(REDIS_WARNING, "I/O error trying to sync with MASTER: %s",
+                     (nread == -1) ? strerror(errno) : "connection lost");
+        }
     }
 
     if (nread <= 0) {
@@ -1163,18 +1171,20 @@ void readSyncBulkPayload(aeEventLoop *el, int fd, void *privdata, int mask) {
     if (usemark) {
         /* Update the last bytes array, and check if it matches our delimiter.*/
         if (nread >= REDIS_RUN_ID_SIZE) {
-            memcpy(lastbytes,buf+nread-REDIS_RUN_ID_SIZE,REDIS_RUN_ID_SIZE);
+            memcpy(lastbytes, buf + nread - REDIS_RUN_ID_SIZE, REDIS_RUN_ID_SIZE);
         } else {
-            int rem = REDIS_RUN_ID_SIZE-nread;
-            memmove(lastbytes,lastbytes+nread,rem);
-            memcpy(lastbytes+rem,buf,nread);
+            int rem = REDIS_RUN_ID_SIZE - nread;
+            memmove(lastbytes, lastbytes + nread, rem);
+            memcpy(lastbytes + rem, buf, nread);
         }
-        if (memcmp(lastbytes,eofmark,REDIS_RUN_ID_SIZE) == 0) eof_reached = 1;
+        if (memcmp(lastbytes, eofmark, REDIS_RUN_ID_SIZE) == 0) eof_reached = 1;
     }
 
     server.repl_transfer_lastio = server.unixtime;
-    if (write(server.repl_transfer_fd,buf,nread) != nread) {
-        redisLog(REDIS_WARNING,"Write error or short write writing to the DB dump file needed for MASTER <-> SLAVE synchronization: %s", strerror(errno));
+    if (write(server.repl_transfer_fd, buf, nread) != nread) {
+        redisLog(REDIS_WARNING,
+                 "Write error or short write writing to the DB dump file needed for MASTER <-> SLAVE synchronization: %s",
+                 strerror(errno));
         goto error;
     }
     server.repl_transfer_read += nread;
@@ -1182,9 +1192,9 @@ void readSyncBulkPayload(aeEventLoop *el, int fd, void *privdata, int mask) {
     /* Delete the last 40 bytes from the file if we reached EOF. */
     if (usemark && eof_reached) {
         if (ftruncate(server.repl_transfer_fd,
-            server.repl_transfer_read - REDIS_RUN_ID_SIZE) == -1)
-        {
-            redisLog(REDIS_WARNING,"Error truncating the RDB file received from the master for SYNC: %s", strerror(errno));
+                      server.repl_transfer_read - REDIS_RUN_ID_SIZE) == -1) {
+            redisLog(REDIS_WARNING, "Error truncating the RDB file received from the master for SYNC: %s",
+                     strerror(errno));
             goto error;
         }
     }
@@ -1193,12 +1203,11 @@ void readSyncBulkPayload(aeEventLoop *el, int fd, void *privdata, int mask) {
      * we may suffer a big delay as the memory buffers are copied into the
      * actual disk. */
     if (server.repl_transfer_read >=
-        server.repl_transfer_last_fsync_off + REPL_MAX_WRITTEN_BEFORE_FSYNC)
-    {
+        server.repl_transfer_last_fsync_off + REPL_MAX_WRITTEN_BEFORE_FSYNC) {
         off_t sync_size = server.repl_transfer_read -
                           server.repl_transfer_last_fsync_off;
         rdb_fsync_range(server.repl_transfer_fd,
-            server.repl_transfer_last_fsync_off, sync_size);
+                        server.repl_transfer_last_fsync_off, sync_size);
         server.repl_transfer_last_fsync_off += sync_size;
     }
 
@@ -1209,8 +1218,10 @@ void readSyncBulkPayload(aeEventLoop *el, int fd, void *privdata, int mask) {
     }
 
     if (eof_reached) {
-        if (rename(server.repl_transfer_tmpfile,server.rdb_filename) == -1) {
-            redisLog(REDIS_WARNING,"Failed trying to rename the temp DB into dump.rdb in MASTER <-> SLAVE synchronization: %s", strerror(errno));
+        if (rename(server.repl_transfer_tmpfile, server.rdb_filename) == -1) {
+            redisLog(REDIS_WARNING,
+                     "Failed trying to rename the temp DB into dump.rdb in MASTER <-> SLAVE synchronization: %s",
+                     strerror(errno));
             replicationAbortSyncTransfer();
             return;
         }
@@ -1221,10 +1232,10 @@ void readSyncBulkPayload(aeEventLoop *el, int fd, void *privdata, int mask) {
          * handler, otherwise it will get called recursively since
          * rdbLoad() will call the event loop to process events from time to
          * time for non blocking loading. */
-        aeDeleteFileEvent(server.el,server.repl_transfer_s,AE_READABLE);
+        aeDeleteFileEvent(server.el, server.repl_transfer_s, AE_READABLE);
         redisLog(REDIS_NOTICE, "MASTER <-> SLAVE sync: Loading DB in memory");
         if (rdbLoad(server.rdb_filename) != REDIS_OK) {
-            redisLog(REDIS_WARNING,"Failed trying to load the MASTER synchronization DB from disk");
+            redisLog(REDIS_WARNING, "Failed trying to load the MASTER synchronization DB from disk");
             replicationAbortSyncTransfer();
             return;
         }
@@ -1232,19 +1243,19 @@ void readSyncBulkPayload(aeEventLoop *el, int fd, void *privdata, int mask) {
         zfree(server.repl_transfer_tmpfile);
         close(server.repl_transfer_fd);
         server.master = createClient(server.repl_transfer_s);
-        if( server.ssl && NULL != server.repl_transfer_ssl.ssl ) {
-          server.master->ssl.ssl = server.repl_transfer_ssl.ssl;
-          server.master->ssl.ctx = server.repl_transfer_ssl.ctx;
-          server.master->ssl.bio = server.repl_transfer_ssl.bio;
-          server.master->ssl.sd = server.repl_transfer_ssl.sd;
-          server.master->ssl.conn_str = server.repl_transfer_ssl.conn_str;
+        if (server.ssl && NULL != server.repl_transfer_ssl.ssl) {
+            server.master->ssl.ssl = server.repl_transfer_ssl.ssl;
+            server.master->ssl.ctx = server.repl_transfer_ssl.ctx;
+            server.master->ssl.bio = server.repl_transfer_ssl.bio;
+            server.master->ssl.sd = server.repl_transfer_ssl.sd;
+            server.master->ssl.conn_str = server.repl_transfer_ssl.conn_str;
         }
         server.master->flags |= REDIS_MASTER;
         server.master->authenticated = 1;
         server.repl_state = REDIS_REPL_CONNECTED;
         server.master->reploff = server.repl_master_initial_offset;
         memcpy(server.master->replrunid, server.repl_master_runid,
-            sizeof(server.repl_master_runid));
+               sizeof(server.repl_master_runid));
         /* If master offset is set to -1, this master is old and is not
          * PSYNC capable, so we flag it accordingly. */
         if (server.master->reploff == -1)
@@ -1258,11 +1269,13 @@ void readSyncBulkPayload(aeEventLoop *el, int fd, void *privdata, int mask) {
 
             stopAppendOnly();
             while (retry-- && startAppendOnly() == REDIS_ERR) {
-                redisLog(REDIS_WARNING,"Failed enabling the AOF after successful master synchronization! Trying it again in one second.");
+                redisLog(REDIS_WARNING,
+                         "Failed enabling the AOF after successful master synchronization! Trying it again in one second.");
                 sleep(1);
             }
             if (!retry) {
-                redisLog(REDIS_WARNING,"FATAL: this slave instance finished the synchronization with its master, but the AOF can't be turned on. Exiting now.");
+                redisLog(REDIS_WARNING,
+                         "FATAL: this slave instance finished the synchronization with its master, but the AOF can't be turned on. Exiting now.");
                 exit(1);
             }
         }
@@ -1270,7 +1283,7 @@ void readSyncBulkPayload(aeEventLoop *el, int fd, void *privdata, int mask) {
 
     return;
 
-error:
+    error:
     replicationAbortSyncTransfer();
     return;
 }
@@ -1284,7 +1297,8 @@ error:
 #define SYNC_CMD_READ (1<<0)
 #define SYNC_CMD_WRITE (1<<1)
 #define SYNC_CMD_FULL (SYNC_CMD_READ|SYNC_CMD_WRITE)
-char *sendSynchronousCommand(int flags, int fd, SSL* ssl, ...) {
+
+char *sendSynchronousCommand(int flags, int fd, SSL *ssl, ...) {
 
     /* Create the command to send to the master, we use simple inline
      * protocol for simplicity as currently we only send simple strings. */
@@ -1292,24 +1306,23 @@ char *sendSynchronousCommand(int flags, int fd, SSL* ssl, ...) {
         char *arg;
         va_list ap;
         sds cmd = sdsempty();
-        va_start(ap,ssl);
+        va_start(ap, ssl);
 
-        while(1) {
+        while (1) {
             arg = va_arg(ap, char*);
             if (arg == NULL) break;
 
-            if (sdslen(cmd) != 0) cmd = sdscatlen(cmd," ",1);
-            cmd = sdscat(cmd,arg);
+            if (sdslen(cmd) != 0) cmd = sdscatlen(cmd, " ", 1);
+            cmd = sdscat(cmd, arg);
         }
-        cmd = sdscatlen(cmd,"\r\n",2);
+        cmd = sdscatlen(cmd, "\r\n", 2);
 
         /* Transfer command to the server. */
-        if (syncWrite(fd,ssl,cmd,sdslen(cmd),server.repl_syncio_timeout*1000)
-            == -1)
-        {
+        if (syncWrite(fd, ssl, cmd, sdslen(cmd), server.repl_syncio_timeout * 1000)
+            == -1) {
             sdsfree(cmd);
-            return sdscatprintf(sdsempty(),"-Writing to master: %s",
-                    strerror(errno));
+            return sdscatprintf(sdsempty(), "-Writing to master: %s",
+                                strerror(errno));
         }
         sdsfree(cmd);
         va_end(ap);
@@ -1319,11 +1332,10 @@ char *sendSynchronousCommand(int flags, int fd, SSL* ssl, ...) {
     if (flags & SYNC_CMD_READ) {
         char buf[256];
 
-        if (syncReadLine(fd,ssl,buf,sizeof(buf),server.repl_syncio_timeout*1000)
-            == -1)
-        {
-            return sdscatprintf(sdsempty(),"-Reading from master: %s",
-                    strerror(errno));
+        if (syncReadLine(fd, ssl, buf, sizeof(buf), server.repl_syncio_timeout * 1000)
+            == -1) {
+            return sdscatprintf(sdsempty(), "-Reading from master: %s",
+                                strerror(errno));
         }
         server.repl_transfer_lastio = server.unixtime;
         return sdsnew(buf);
@@ -1383,43 +1395,44 @@ char *sendSynchronousCommand(int flags, int fd, SSL* ssl, ...) {
 #define PSYNC_CONTINUE 2
 #define PSYNC_FULLRESYNC 3
 #define PSYNC_NOT_SUPPORTED 4
-int slaveTryPartialResynchronization(int fd, anetSSLConnection* sslctn, int read_reply) {
+
+int slaveTryPartialResynchronization(int fd, anetSSLConnection *sslctn, int read_reply) {
     char *psync_runid;
     char psync_offset[32];
     sds reply;
 
     /* Writing half */
     if (!read_reply) {
-    /* Initially set repl_master_initial_offset to -1 to mark the current
-     * master run_id and offset as not valid. Later if we'll be able to do
-     * a FULL resync using the PSYNC command we'll set the offset at the
-     * right value, so that this information will be propagated to the
-     * client structure representing the master into server.master. */
-    server.repl_master_initial_offset = -1;
+        /* Initially set repl_master_initial_offset to -1 to mark the current
+         * master run_id and offset as not valid. Later if we'll be able to do
+         * a FULL resync using the PSYNC command we'll set the offset at the
+         * right value, so that this information will be propagated to the
+         * client structure representing the master into server.master. */
+        server.repl_master_initial_offset = -1;
 
-    if (server.cached_master) {
-        psync_runid = server.cached_master->replrunid;
-        snprintf(psync_offset,sizeof(psync_offset),"%lld", server.cached_master->reploff+1);
-        redisLog(REDIS_NOTICE,"Trying a partial resynchronization (request %s:%s).", psync_runid, psync_offset);
-    } else {
-        redisLog(REDIS_NOTICE,"Partial resynchronization not possible (no cached master)");
-        psync_runid = "?";
-        memcpy(psync_offset,"-1",3);
-    }
+        if (server.cached_master) {
+            psync_runid = server.cached_master->replrunid;
+            snprintf(psync_offset, sizeof(psync_offset), "%lld", server.cached_master->reploff + 1);
+            redisLog(REDIS_NOTICE, "Trying a partial resynchronization (request %s:%s).", psync_runid, psync_offset);
+        } else {
+            redisLog(REDIS_NOTICE, "Partial resynchronization not possible (no cached master)");
+            psync_runid = "?";
+            memcpy(psync_offset, "-1", 3);
+        }
 
-    /* Issue the PSYNC command */
-        reply = sendSynchronousCommand(SYNC_CMD_WRITE,fd,sslctn->ssl,"PSYNC",psync_runid,psync_offset,NULL);
+        /* Issue the PSYNC command */
+        reply = sendSynchronousCommand(SYNC_CMD_WRITE, fd, sslctn->ssl, "PSYNC", psync_runid, psync_offset, NULL);
         if (reply != NULL) {
-            redisLog(REDIS_WARNING,"Unable to send PSYNC to master: %s",reply);
+            redisLog(REDIS_WARNING, "Unable to send PSYNC to master: %s", reply);
             sdsfree(reply);
-            aeDeleteFileEvent(server.el,fd,AE_READABLE);
+            aeDeleteFileEvent(server.el, fd, AE_READABLE);
             return PSYNC_WRITE_ERROR;
         }
         return PSYNC_WAIT_REPLY;
     }
 
     /* Reading half */
-    reply = sendSynchronousCommand(SYNC_CMD_READ,fd,sslctn->ssl,NULL);
+    reply = sendSynchronousCommand(SYNC_CMD_READ, fd, sslctn->ssl, NULL);
     if (sdslen(reply) == 0) {
         /* The master may send empty newlines after it receives PSYNC
          * and before to reply, just to keep the connection alive. */
@@ -1427,34 +1440,34 @@ int slaveTryPartialResynchronization(int fd, anetSSLConnection* sslctn, int read
         return PSYNC_WAIT_REPLY;
     }
 
-    aeDeleteFileEvent(server.el,fd,AE_READABLE);
+    aeDeleteFileEvent(server.el, fd, AE_READABLE);
 
-    if (!strncmp(reply,"+FULLRESYNC",11)) {
+    if (!strncmp(reply, "+FULLRESYNC", 11)) {
         char *runid = NULL, *offset = NULL;
 
         /* FULL RESYNC, parse the reply in order to extract the run id
          * and the replication offset. */
-        runid = strchr(reply,' ');
+        runid = strchr(reply, ' ');
         if (runid) {
             runid++;
-            offset = strchr(runid,' ');
+            offset = strchr(runid, ' ');
             if (offset) offset++;
         }
-        if (!runid || !offset || (offset-runid-1) != REDIS_RUN_ID_SIZE) {
+        if (!runid || !offset || (offset - runid - 1) != REDIS_RUN_ID_SIZE) {
             redisLog(REDIS_WARNING,
-                "Master replied with wrong +FULLRESYNC syntax.");
+                     "Master replied with wrong +FULLRESYNC syntax.");
             /* This is an unexpected condition, actually the +FULLRESYNC
              * reply means that the master supports PSYNC, but the reply
              * format seems wrong. To stay safe we blank the master
              * runid to make sure next PSYNCs will fail. */
-            memset(server.repl_master_runid,0,REDIS_RUN_ID_SIZE+1);
+            memset(server.repl_master_runid, 0, REDIS_RUN_ID_SIZE + 1);
         } else {
-            memcpy(server.repl_master_runid, runid, offset-runid-1);
+            memcpy(server.repl_master_runid, runid, offset - runid - 1);
             server.repl_master_runid[REDIS_RUN_ID_SIZE] = '\0';
-            server.repl_master_initial_offset = strtoll(offset,NULL,10);
-            redisLog(REDIS_NOTICE,"Full resync from master: %s:%lld",
-                server.repl_master_runid,
-                server.repl_master_initial_offset);
+            server.repl_master_initial_offset = strtoll(offset, NULL, 10);
+            redisLog(REDIS_NOTICE, "Full resync from master: %s:%lld",
+                     server.repl_master_runid,
+                     server.repl_master_initial_offset);
         }
         /* We are going to full resync, discard the cached master structure. */
         replicationDiscardCachedMaster();
@@ -1462,12 +1475,12 @@ int slaveTryPartialResynchronization(int fd, anetSSLConnection* sslctn, int read
         return PSYNC_FULLRESYNC;
     }
 
-    if (!strncmp(reply,"+CONTINUE",9)) {
+    if (!strncmp(reply, "+CONTINUE", 9)) {
         /* Partial resync was accepted, set the replication state accordingly */
         redisLog(REDIS_NOTICE,
-            "Successful partial resynchronization with master.");
+                 "Successful partial resynchronization with master.");
         sdsfree(reply);
-        replicationResurrectCachedMaster(fd,sslctn);
+        replicationResurrectCachedMaster(fd, sslctn);
         return PSYNC_CONTINUE;
     }
 
@@ -1475,14 +1488,14 @@ int slaveTryPartialResynchronization(int fd, anetSSLConnection* sslctn, int read
      * not understand PSYNC, or an unexpected reply from the master.
      * Return PSYNC_NOT_SUPPORTED to the caller in both cases. */
 
-    if (strncmp(reply,"-ERR",4)) {
+    if (strncmp(reply, "-ERR", 4)) {
         /* If it's not an error, log the unexpected event. */
         redisLog(REDIS_WARNING,
-            "Unexpected reply to PSYNC from master: %s", reply);
+                 "Unexpected reply to PSYNC from master: %s", reply);
     } else {
         redisLog(REDIS_NOTICE,
-            "Master does not support PSYNC or is in "
-            "error state (reply: %s)", reply);
+                 "Master does not support PSYNC or is in "
+                         "error state (reply: %s)", reply);
     }
     sdsfree(reply);
     replicationDiscardCachedMaster();
@@ -1509,28 +1522,28 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
     if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &sockerr, &errlen) == -1)
         sockerr = errno;
     if (sockerr) {
-        redisLog(REDIS_WARNING,"Error condition on socket for SYNC: %s",
-            strerror(sockerr));
+        redisLog(REDIS_WARNING, "Error condition on socket for SYNC: %s",
+                 strerror(sockerr));
         goto error;
     }
 
     /* Send a PING to check the master is able to reply without errors. */
     if (server.repl_state == REDIS_REPL_CONNECTING) {
-        redisLog(REDIS_NOTICE,"Non blocking connect for SYNC fired the event.");
+        redisLog(REDIS_NOTICE, "Non blocking connect for SYNC fired the event.");
         /* Delete the writable event so that the readable event remains
          * registered and we can wait for the PONG reply. */
-        aeDeleteFileEvent(server.el,fd,AE_WRITABLE);
+        aeDeleteFileEvent(server.el, fd, AE_WRITABLE);
         server.repl_state = REDIS_REPL_RECEIVE_PONG;
         /* Send the PING, don't check for errors at all, we have the timeout
          * that will take care about this. */
-        err = sendSynchronousCommand(SYNC_CMD_WRITE,fd,server.repl_transfer_ssl.ssl,"PING",NULL);
+        err = sendSynchronousCommand(SYNC_CMD_WRITE, fd, server.repl_transfer_ssl.ssl, "PING", NULL);
         if (err) goto write_error;
         return;
     }
 
     /* Receive the PONG command. */
     if (server.repl_state == REDIS_REPL_RECEIVE_PONG) {
-        err = sendSynchronousCommand(SYNC_CMD_READ,fd,server.repl_transfer_ssl.ssl,NULL);
+        err = sendSynchronousCommand(SYNC_CMD_READ, fd, server.repl_transfer_ssl.ssl, NULL);
 
         /* We accept only two replies as valid, a positive +PONG reply
          * (we just check for "+") or an authentication error.
@@ -1538,15 +1551,14 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
          * permitted" instead of using a proper error code, so we test
          * both. */
         if (err[0] != '+' &&
-            strncmp(err,"-NOAUTH",7) != 0 &&
-            strncmp(err,"-ERR operation not permitted",28) != 0)
-        {
-            redisLog(REDIS_WARNING,"Error reply to PING from master: '%s'",err);
+            strncmp(err, "-NOAUTH", 7) != 0 &&
+            strncmp(err, "-ERR operation not permitted", 28) != 0) {
+            redisLog(REDIS_WARNING, "Error reply to PING from master: '%s'", err);
             sdsfree(err);
             goto error;
         } else {
             redisLog(REDIS_NOTICE,
-                "Master replied to PING, replication can continue...");
+                     "Master replied to PING, replication can continue...");
         }
         sdsfree(err);
         server.repl_state = REDIS_REPL_SEND_AUTH;
@@ -1554,8 +1566,9 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
 
     /* AUTH with the master if required. */
     if (server.repl_state == REDIS_REPL_SEND_AUTH) {
-   		if (server.masterauth) {
-            err = sendSynchronousCommand(SYNC_CMD_WRITE,fd, server.repl_transfer_ssl.ssl,"AUTH",server.masterauth,NULL);
+        if (server.masterauth) {
+            err = sendSynchronousCommand(SYNC_CMD_WRITE, fd, server.repl_transfer_ssl.ssl, "AUTH", server.masterauth,
+                                         NULL);
             if (err) goto write_error;
             server.repl_state = REDIS_REPL_RECEIVE_AUTH;
             return;
@@ -1566,9 +1579,9 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
 
     /* Receive AUTH reply. */
     if (server.repl_state == REDIS_REPL_RECEIVE_AUTH) {
-        err = sendSynchronousCommand(SYNC_CMD_READ,fd, server.repl_transfer_ssl.ssl,NULL);
+        err = sendSynchronousCommand(SYNC_CMD_READ, fd, server.repl_transfer_ssl.ssl, NULL);
         if (err[0] == '-') {
-            redisLog(REDIS_WARNING,"Unable to AUTH to MASTER: %s",err);
+            redisLog(REDIS_WARNING, "Unable to AUTH to MASTER: %s", err);
             sdsfree(err);
             goto error;
         }
@@ -1580,8 +1593,8 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
      * slave listening port correctly. */
     if (server.repl_state == REDIS_REPL_SEND_PORT) {
         sds port = sdsfromlonglong(server.port);
-        err = sendSynchronousCommand(SYNC_CMD_WRITE,fd,server.repl_transfer_ssl.ssl,"REPLCONF",
-                "listening-port",port, NULL);
+        err = sendSynchronousCommand(SYNC_CMD_WRITE, fd, server.repl_transfer_ssl.ssl, "REPLCONF",
+                                     "listening-port", port, NULL);
         sdsfree(port);
         if (err) goto write_error;
         sdsfree(err);
@@ -1591,12 +1604,12 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
 
     /* Receive REPLCONF listening-port reply. */
     if (server.repl_state == REDIS_REPL_RECEIVE_PORT) {
-        err = sendSynchronousCommand(SYNC_CMD_READ,fd,server.repl_transfer_ssl.ssl,NULL);
+        err = sendSynchronousCommand(SYNC_CMD_READ, fd, server.repl_transfer_ssl.ssl, NULL);
         /* Ignore the error if any, not all the Redis versions support
          * REPLCONF listening-port. */
         if (err[0] == '-') {
-            redisLog(REDIS_NOTICE,"(Non critical) Master does not understand "
-                                  "REPLCONF listening-port: %s", err);
+            redisLog(REDIS_NOTICE, "(Non critical) Master does not understand "
+                    "REPLCONF listening-port: %s", err);
         }
         sdsfree(err);
         server.repl_state = REDIS_REPL_SEND_CAPA;
@@ -1607,8 +1620,8 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
      * in the form of REPLCONF capa X capa Y capa Z ...
      * The master will ignore capabilities it does not understand. */
     if (server.repl_state == REDIS_REPL_SEND_CAPA) {
-        err = sendSynchronousCommand(SYNC_CMD_WRITE,fd,server.repl_transfer_ssl.ssl,"REPLCONF",
-                "capa","eof",NULL);
+        err = sendSynchronousCommand(SYNC_CMD_WRITE, fd, server.repl_transfer_ssl.ssl, "REPLCONF",
+                                     "capa", "eof", NULL);
         if (err) goto write_error;
         sdsfree(err);
         server.repl_state = REDIS_REPL_RECEIVE_CAPA;
@@ -1617,12 +1630,12 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
 
     /* Receive CAPA reply. */
     if (server.repl_state == REDIS_REPL_RECEIVE_CAPA) {
-        err = sendSynchronousCommand(SYNC_CMD_READ,fd,server.repl_transfer_ssl.ssl,NULL);
+        err = sendSynchronousCommand(SYNC_CMD_READ, fd, server.repl_transfer_ssl.ssl, NULL);
         /* Ignore the error if any, not all the Redis versions support
          * REPLCONF capa. */
         if (err[0] == '-') {
-            redisLog(REDIS_NOTICE,"(Non critical) Master does not understand "
-                                  "REPLCONF capa: %s", err);
+            redisLog(REDIS_NOTICE, "(Non critical) Master does not understand "
+                    "REPLCONF capa: %s", err);
         }
         sdsfree(err);
         server.repl_state = REDIS_REPL_SEND_PSYNC;
@@ -1634,7 +1647,7 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
      * and the global offset, to try a partial resync at the next
      * reconnection attempt. */
     if (server.repl_state == REDIS_REPL_SEND_PSYNC) {
-        if (slaveTryPartialResynchronization(fd,&server.repl_transfer_ssl,0) == PSYNC_WRITE_ERROR) {
+        if (slaveTryPartialResynchronization(fd, &server.repl_transfer_ssl, 0) == PSYNC_WRITE_ERROR) {
             err = sdsnew("Write error sending the PSYNC command.");
             goto write_error;
         }
@@ -1644,13 +1657,13 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
 
     /* If reached this point, we should be in REDIS_REPL_RECEIVE_PSYNC. */
     if (server.repl_state != REDIS_REPL_RECEIVE_PSYNC) {
-        redisLog(REDIS_WARNING,"syncWithMaster(): state machine error, "
-                             "state should be RECEIVE_PSYNC but is %d",
-                             server.repl_state);
+        redisLog(REDIS_WARNING, "syncWithMaster(): state machine error, "
+                         "state should be RECEIVE_PSYNC but is %d",
+                 server.repl_state);
         goto error;
     }
 
-    psync_result = slaveTryPartialResynchronization(fd,&server.repl_transfer_ssl,1);
+    psync_result = slaveTryPartialResynchronization(fd, &server.repl_transfer_ssl, 1);
     if (psync_result == PSYNC_WAIT_REPLY) return; /* Try again later... */
 
     /* Note: if PSYNC does not return WAIT_REPLY, it will take care of
@@ -1672,34 +1685,34 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
      * and the server.repl_master_runid and repl_master_initial_offset are
      * already populated. */
     if (psync_result == PSYNC_NOT_SUPPORTED) {
-        redisLog(REDIS_NOTICE,"Retrying with SYNC...");
-        if (syncWrite(fd,server.repl_transfer_ssl.ssl,"SYNC\r\n",6,server.repl_syncio_timeout*1000) == -1) {
-            redisLog(REDIS_WARNING,"I/O error writing to MASTER: %s",
-                strerror(errno));
+        redisLog(REDIS_NOTICE, "Retrying with SYNC...");
+        if (syncWrite(fd, server.repl_transfer_ssl.ssl, "SYNC\r\n", 6, server.repl_syncio_timeout * 1000) == -1) {
+            redisLog(REDIS_WARNING, "I/O error writing to MASTER: %s",
+                     strerror(errno));
             goto error;
         }
     }
 
     /* Prepare a suitable temp file for bulk transfer */
-    while(maxtries--) {
-        snprintf(tmpfile,256,
-            "temp-%d.%ld.rdb",(int)server.unixtime,(long int)getpid());
-        dfd = open(tmpfile,O_CREAT|O_WRONLY|O_EXCL,0644);
+    while (maxtries--) {
+        snprintf(tmpfile, 256,
+                 "temp-%d.%ld.rdb", (int) server.unixtime, (long int) getpid());
+        dfd = open(tmpfile, O_CREAT | O_WRONLY | O_EXCL, 0644);
         if (dfd != -1) break;
         sleep(1);
     }
     if (dfd == -1) {
-        redisLog(REDIS_WARNING,"Opening the temp file needed for MASTER <-> SLAVE synchronization: %s",strerror(errno));
+        redisLog(REDIS_WARNING, "Opening the temp file needed for MASTER <-> SLAVE synchronization: %s",
+                 strerror(errno));
         goto error;
     }
 
     /* Setup the non blocking download of the bulk file. */
-    if (aeCreateFileEvent(server.el,fd, AE_READABLE,readSyncBulkPayload,NULL,0)
-            == AE_ERR)
-    {
+    if (aeCreateFileEvent(server.el, fd, AE_READABLE, readSyncBulkPayload, NULL, 0)
+        == AE_ERR) {
         redisLog(REDIS_WARNING,
-            "Can't create readable event for SYNC: %s (fd=%d)",
-            strerror(errno),fd);
+                 "Can't create readable event for SYNC: %s (fd=%d)",
+                 strerror(errno), fd);
         goto error;
     }
 
@@ -1712,15 +1725,15 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
     server.repl_transfer_tmpfile = zstrdup(tmpfile);
     return;
 
-error:
-    aeDeleteFileEvent(server.el,fd,AE_READABLE|AE_WRITABLE);
+    error:
+    aeDeleteFileEvent(server.el, fd, AE_READABLE | AE_WRITABLE);
     close(fd);
     server.repl_transfer_s = -1;
     server.repl_state = REDIS_REPL_CONNECT;
     return;
 
-write_error: /* Handle sendSynchronousCommand(SYNC_CMD_WRITE) errors. */
-    redisLog(REDIS_WARNING,"Sending command to master in replication handshake: %s", err);
+    write_error: /* Handle sendSynchronousCommand(SYNC_CMD_WRITE) errors. */
+    redisLog(REDIS_WARNING, "Sending command to master in replication handshake: %s", err);
     sdsfree(err);
     goto error;
 }
@@ -1728,33 +1741,34 @@ write_error: /* Handle sendSynchronousCommand(SYNC_CMD_WRITE) errors. */
 int connectWithMaster(void) {
     int fd;
     char connectErrorBuf[1024];
-    anetSSLConnection  sslctn;
+    anetSSLConnection sslctn;
     sslctn.ssl = NULL;
     sslctn.bio = NULL;
     sslctn.ctx = NULL;
     sslctn.conn_str = NULL;
 
-    if( server.ssl ) {
-      fd = anetSSLGenericConnect(connectErrorBuf, server.masterhost,server.masterport, 0, &sslctn, server.ssl_root_file, server.ssl_root_dir, server.ssl_srvr_cert_common_name );
-      if( fd < 0 ) {
-        redisLog(REDIS_WARNING,"Unable to connect to MASTER via SSL: %s", connectErrorBuf );
-        return REDIS_ERR;
-      }
+    if (server.ssl) {
+        fd = anetSSLGenericConnect(connectErrorBuf, server.masterhost, server.masterport, 0, &sslctn,
+                                   server.tls_version, server.ssl_root_file, server.ssl_root_dir,
+                                   server.ssl_srvr_cert_common_name);
+        if (fd < 0) {
+            redisLog(REDIS_WARNING, "Unable to connect to MASTER via SSL: %s", connectErrorBuf);
+            return REDIS_ERR;
+        }
     } else {
-      fd = anetTcpNonBlockConnect(NULL,server.masterhost,server.masterport);
+        fd = anetTcpNonBlockConnect(NULL, server.masterhost, server.masterport);
     }
 
     if (fd == -1) {
-        redisLog(REDIS_WARNING,"Unable to connect to MASTER: %s",
-            strerror(errno));
+        redisLog(REDIS_WARNING, "Unable to connect to MASTER: %s",
+                 strerror(errno));
         return REDIS_ERR;
     }
 
-    if (aeCreateFileEvent(server.el,fd,AE_READABLE|AE_WRITABLE,syncWithMaster,NULL,0) ==
-            AE_ERR)
-    {
+    if (aeCreateFileEvent(server.el, fd, AE_READABLE | AE_WRITABLE, syncWithMaster, NULL, 0) ==
+        AE_ERR) {
         close(fd);
-        redisLog(REDIS_WARNING,"Can't create readable event for SYNC");
+        redisLog(REDIS_WARNING, "Can't create readable event for SYNC");
         return REDIS_ERR;
     }
 
@@ -1762,7 +1776,7 @@ int connectWithMaster(void) {
     server.repl_transfer_s = fd;
     server.repl_state = REDIS_REPL_CONNECTING;
 
-    if( server.ssl && NULL != sslctn.ssl) {
+    if (server.ssl && NULL != sslctn.ssl) {
         server.repl_transfer_ssl.ctx = sslctn.ctx;
         server.repl_transfer_ssl.ssl = sslctn.ssl;
         server.repl_transfer_ssl.bio = sslctn.bio;
@@ -1780,10 +1794,10 @@ void undoConnectWithMaster(void) {
 
     redisAssert(server.repl_state == REDIS_REPL_CONNECTING ||
                 slaveIsInHandshakeState());
-    aeDeleteFileEvent(server.el,fd,AE_READABLE|AE_WRITABLE);
+    aeDeleteFileEvent(server.el, fd, AE_READABLE | AE_WRITABLE);
 
-    if( server.repl_transfer_ssl.ssl ) {
-      anetCleanupSSL( &( server.repl_transfer_ssl ) );
+    if (server.repl_transfer_ssl.ssl) {
+        anetCleanupSSL(&(server.repl_transfer_ssl));
     }
 
     close(fd);
@@ -1803,8 +1817,7 @@ int cancelReplicationHandshake(void) {
     if (server.repl_state == REDIS_REPL_TRANSFER) {
         replicationAbortSyncTransfer();
     } else if (server.repl_state == REDIS_REPL_CONNECTING ||
-               slaveIsInHandshakeState())
-    {
+               slaveIsInHandshakeState()) {
         undoConnectWithMaster();
     } else {
         return 0;
@@ -1864,19 +1877,19 @@ void slaveofCommand(redisClient *c) {
     /* SLAVEOF is not allowed in cluster mode as replication is automatically
      * configured using the current address of the master node. */
     if (server.cluster_enabled) {
-        addReplyError(c,"SLAVEOF not allowed in cluster mode.");
+        addReplyError(c, "SLAVEOF not allowed in cluster mode.");
         return;
     }
 
     /* The special host/port combination "NO" "ONE" turns the instance
      * into a master. Otherwise the new master address is set. */
-    if (!strcasecmp(c->argv[1]->ptr,"no") &&
-        !strcasecmp(c->argv[2]->ptr,"one")) {
+    if (!strcasecmp(c->argv[1]->ptr, "no") &&
+        !strcasecmp(c->argv[2]->ptr, "one")) {
         if (server.masterhost) {
             replicationUnsetMaster();
-            sds client = catClientInfoString(sdsempty(),c);
+            sds client = catClientInfoString(sdsempty(), c);
             redisLog(REDIS_NOTICE,
-                "MASTER MODE enabled (user request from '%s')",client);
+                     "MASTER MODE enabled (user request from '%s')", client);
             sdsfree(client);
         }
     } else {
@@ -1886,21 +1899,22 @@ void slaveofCommand(redisClient *c) {
             return;
 
         /* Check if we are already attached to the specified slave */
-        if (server.masterhost && !strcasecmp(server.masterhost,c->argv[1]->ptr)
+        if (server.masterhost && !strcasecmp(server.masterhost, c->argv[1]->ptr)
             && server.masterport == port) {
-            redisLog(REDIS_NOTICE,"SLAVE OF would result into synchronization with the master we are already connected with. No operation performed.");
-            addReplySds(c,sdsnew("+OK Already connected to specified master\r\n"));
+            redisLog(REDIS_NOTICE,
+                     "SLAVE OF would result into synchronization with the master we are already connected with. No operation performed.");
+            addReplySds(c, sdsnew("+OK Already connected to specified master\r\n"));
             return;
         }
         /* There was no previous master or the user specified a different one,
          * we can continue. */
         replicationSetMaster(c->argv[1]->ptr, port);
-        sds client = catClientInfoString(sdsempty(),c);
-        redisLog(REDIS_NOTICE,"SLAVE OF %s:%d enabled (user request from '%s')",
-            server.masterhost, server.masterport, client);
+        sds client = catClientInfoString(sdsempty(), c);
+        redisLog(REDIS_NOTICE, "SLAVE OF %s:%d enabled (user request from '%s')",
+                 server.masterhost, server.masterport, client);
         sdsfree(client);
     }
-    addReply(c,shared.ok);
+    addReply(c, shared.ok);
 }
 
 /* ROLE command: provide information about the role of the instance
@@ -1913,45 +1927,57 @@ void roleCommand(redisClient *c) {
         void *mbcount;
         int slaves = 0;
 
-        addReplyMultiBulkLen(c,3);
-        addReplyBulkCBuffer(c,"master",6);
-        addReplyLongLong(c,server.master_repl_offset);
+        addReplyMultiBulkLen(c, 3);
+        addReplyBulkCBuffer(c, "master", 6);
+        addReplyLongLong(c, server.master_repl_offset);
         mbcount = addDeferredMultiBulkLength(c);
-        listRewind(server.slaves,&li);
-        while((ln = listNext(&li))) {
+        listRewind(server.slaves, &li);
+        while ((ln = listNext(&li))) {
             redisClient *slave = ln->value;
             char ip[REDIS_IP_STR_LEN];
 
-            if (anetPeerToString(slave->fd,ip,sizeof(ip),NULL) == -1) continue;
+            if (anetPeerToString(slave->fd, ip, sizeof(ip), NULL) == -1) continue;
             if (slave->replstate != REDIS_REPL_ONLINE) continue;
-            addReplyMultiBulkLen(c,3);
-            addReplyBulkCString(c,ip);
-            addReplyBulkLongLong(c,slave->slave_listening_port);
-            addReplyBulkLongLong(c,slave->repl_ack_off);
+            addReplyMultiBulkLen(c, 3);
+            addReplyBulkCString(c, ip);
+            addReplyBulkLongLong(c, slave->slave_listening_port);
+            addReplyBulkLongLong(c, slave->repl_ack_off);
             slaves++;
         }
-        setDeferredMultiBulkLength(c,mbcount,slaves);
+        setDeferredMultiBulkLength(c, mbcount, slaves);
     } else {
         char *slavestate = NULL;
 
-        addReplyMultiBulkLen(c,5);
-        addReplyBulkCBuffer(c,"slave",5);
-        addReplyBulkCString(c,server.masterhost);
-        addReplyLongLong(c,server.masterport);
+        addReplyMultiBulkLen(c, 5);
+        addReplyBulkCBuffer(c, "slave", 5);
+        addReplyBulkCString(c, server.masterhost);
+        addReplyLongLong(c, server.masterport);
         if (slaveIsInHandshakeState()) {
             slavestate = "handshake";
         } else {
-        switch(server.repl_state) {
-        case REDIS_REPL_NONE: slavestate = "none"; break;
-        case REDIS_REPL_CONNECT: slavestate = "connect"; break;
-        case REDIS_REPL_CONNECTING: slavestate = "connecting"; break;
-        case REDIS_REPL_TRANSFER: slavestate = "sync"; break;
-        case REDIS_REPL_CONNECTED: slavestate = "connected"; break;
-        default: slavestate = "unknown"; break;
+            switch (server.repl_state) {
+                case REDIS_REPL_NONE:
+                    slavestate = "none";
+                    break;
+                case REDIS_REPL_CONNECT:
+                    slavestate = "connect";
+                    break;
+                case REDIS_REPL_CONNECTING:
+                    slavestate = "connecting";
+                    break;
+                case REDIS_REPL_TRANSFER:
+                    slavestate = "sync";
+                    break;
+                case REDIS_REPL_CONNECTED:
+                    slavestate = "connected";
+                    break;
+                default:
+                    slavestate = "unknown";
+                    break;
+            }
         }
-        }
-        addReplyBulkCString(c,slavestate);
-        addReplyLongLong(c,server.master ? server.master->reploff : -1);
+        addReplyBulkCString(c, slavestate);
+        addReplyLongLong(c, server.master ? server.master->reploff : -1);
     }
 }
 
@@ -1963,10 +1989,10 @@ void replicationSendAck(void) {
 
     if (c != NULL) {
         c->flags |= REDIS_MASTER_FORCE_REPLY;
-        addReplyMultiBulkLen(c,3);
-        addReplyBulkCString(c,"REPLCONF");
-        addReplyBulkCString(c,"ACK");
-        addReplyBulkLongLong(c,c->reploff);
+        addReplyMultiBulkLen(c, 3);
+        addReplyBulkCString(c, "REPLCONF");
+        addReplyBulkCString(c, "ACK");
+        addReplyBulkLongLong(c, c->reploff);
         c->flags &= ~REDIS_MASTER_FORCE_REPLY;
     }
 }
@@ -1995,13 +2021,13 @@ void replicationCacheMaster(redisClient *c) {
     listNode *ln;
 
     redisAssert(server.master != NULL && server.cached_master == NULL);
-    redisLog(REDIS_NOTICE,"Caching the disconnected master state.");
+    redisLog(REDIS_NOTICE, "Caching the disconnected master state.");
 
     /* Remove from the list of clients, we don't want this client to be
      * listed by CLIENT LIST or processed in any way by batch operations. */
-    ln = listSearchKey(server.clients,c);
+    ln = listSearchKey(server.clients, c);
     redisAssert(ln != NULL);
-    listDelNode(server.clients,ln);
+    listDelNode(server.clients, ln);
 
     /* Save the master. Server.master will be set to null later by
      * replicationHandleMasterDisconnection(). */
@@ -2009,11 +2035,11 @@ void replicationCacheMaster(redisClient *c) {
 
     /* Remove the event handlers and close the socket. We'll later reuse
      * the socket of the new connection with the master during PSYNC. */
-    aeDeleteFileEvent(server.el,c->fd,AE_READABLE);
-    aeDeleteFileEvent(server.el,c->fd,AE_WRITABLE);
+    aeDeleteFileEvent(server.el, c->fd, AE_READABLE);
+    aeDeleteFileEvent(server.el, c->fd, AE_WRITABLE);
     close(c->fd);
-    anetCleanupSSL( &c->ssl );
- 
+    anetCleanupSSL(&c->ssl);
+
     /* Set fd to -1 so that we can safely call freeClient(c) later. */
     c->fd = -1;
 
@@ -2034,7 +2060,7 @@ void replicationCacheMaster(redisClient *c) {
 void replicationDiscardCachedMaster(void) {
     if (server.cached_master == NULL) return;
 
-    redisLog(REDIS_NOTICE,"Discarding previously cached master state.");
+    redisLog(REDIS_NOTICE, "Discarding previously cached master state.");
     server.cached_master->flags &= ~REDIS_MASTER;
     freeClient(server.cached_master);
     server.cached_master = NULL;
@@ -2046,7 +2072,7 @@ void replicationDiscardCachedMaster(void) {
  * This function is called when successfully setup a partial resynchronization
  * so the stream of data that we'll receive will start from were this
  * master left. */
-void replicationResurrectCachedMaster(int newfd, anetSSLConnection* sslctn) {
+void replicationResurrectCachedMaster(int newfd, anetSSLConnection *sslctn) {
     server.master = server.cached_master;
     server.cached_master = NULL;
     server.master->fd = newfd;
@@ -2054,16 +2080,17 @@ void replicationResurrectCachedMaster(int newfd, anetSSLConnection* sslctn) {
     server.master->ssl.ctx = sslctn->ctx;
     server.master->ssl.bio = sslctn->bio;
     server.master->ssl.sd = sslctn->sd;
-    server.master->flags &= ~(REDIS_CLOSE_AFTER_REPLY|REDIS_CLOSE_ASAP);
+    server.master->flags &= ~(REDIS_CLOSE_AFTER_REPLY | REDIS_CLOSE_ASAP);
     server.master->authenticated = 1;
     server.master->lastinteraction = server.unixtime;
     server.repl_state = REDIS_REPL_CONNECTED;
 
     /* Re-add to the list of clients. */
-    listAddNodeTail(server.clients,server.master);
+    listAddNodeTail(server.clients, server.master);
     if (aeCreateFileEvent(server.el, newfd, AE_READABLE,
-                          readQueryFromClient, server.master,0)) {
-        redisLog(REDIS_WARNING,"Error resurrecting the cached master, impossible to add the readable handler: %s", strerror(errno));
+                          readQueryFromClient, server.master, 0)) {
+        redisLog(REDIS_WARNING, "Error resurrecting the cached master, impossible to add the readable handler: %s",
+                 strerror(errno));
         freeClientAsync(server.master); /* Close ASAP. */
     }
 
@@ -2071,8 +2098,9 @@ void replicationResurrectCachedMaster(int newfd, anetSSLConnection* sslctn) {
      * pending data in the write buffers. */
     if (server.master->bufpos || listLength(server.master->reply)) {
         if (aeCreateFileEvent(server.el, newfd, AE_WRITABLE,
-                          sendReplyToClient, server.master,0)) {
-            redisLog(REDIS_WARNING,"Error resurrecting the cached master, impossible to add the writable handler: %s", strerror(errno));
+                              sendReplyToClient, server.master, 0)) {
+            redisLog(REDIS_WARNING, "Error resurrecting the cached master, impossible to add the writable handler: %s",
+                     strerror(errno));
             freeClientAsync(server.master); /* Close ASAP. */
         }
     }
@@ -2089,15 +2117,17 @@ void refreshGoodSlavesCount(void) {
     int good = 0;
 
     if (!server.repl_min_slaves_to_write ||
-        !server.repl_min_slaves_max_lag) return;
+        !server.repl_min_slaves_max_lag)
+        return;
 
-    listRewind(server.slaves,&li);
-    while((ln = listNext(&li))) {
+    listRewind(server.slaves, &li);
+    while ((ln = listNext(&li))) {
         redisClient *slave = ln->value;
         time_t lag = server.unixtime - slave->repl_ack_time;
 
         if (slave->replstate == REDIS_REPL_ONLINE &&
-            lag <= server.repl_min_slaves_max_lag) good++;
+            lag <= server.repl_min_slaves_max_lag)
+            good++;
     }
     server.repl_good_slaves_count = good;
 }
@@ -2136,7 +2166,7 @@ void refreshGoodSlavesCount(void) {
 /* Initialize the script cache, only called at startup. */
 void replicationScriptCacheInit(void) {
     server.repl_scriptcache_size = 10000;
-    server.repl_scriptcache_dict = dictCreate(&replScriptCacheDictType,NULL);
+    server.repl_scriptcache_dict = dictCreate(&replScriptCacheDictType, NULL);
     server.repl_scriptcache_fifo = listCreate();
 }
 
@@ -2152,7 +2182,7 @@ void replicationScriptCacheInit(void) {
  *    to reclaim otherwise unused memory.
  */
 void replicationScriptCacheFlush(void) {
-    dictEmpty(server.repl_scriptcache_dict,NULL);
+    dictEmpty(server.repl_scriptcache_dict, NULL);
     listRelease(server.repl_scriptcache_fifo);
     server.repl_scriptcache_fifo = listCreate();
 }
@@ -2164,26 +2194,25 @@ void replicationScriptCacheAdd(sds sha1) {
     sds key = sdsdup(sha1);
 
     /* Evict oldest. */
-    if (listLength(server.repl_scriptcache_fifo) ==  (unsigned int)server.repl_scriptcache_size)
-    {
+    if (listLength(server.repl_scriptcache_fifo) == (unsigned int) server.repl_scriptcache_size) {
         listNode *ln = listLast(server.repl_scriptcache_fifo);
         sds oldest = listNodeValue(ln);
 
-        retval = dictDelete(server.repl_scriptcache_dict,oldest);
+        retval = dictDelete(server.repl_scriptcache_dict, oldest);
         redisAssert(retval == DICT_OK);
-        listDelNode(server.repl_scriptcache_fifo,ln);
+        listDelNode(server.repl_scriptcache_fifo, ln);
     }
 
     /* Add current. */
-    retval = dictAdd(server.repl_scriptcache_dict,key,NULL);
-    listAddNodeHead(server.repl_scriptcache_fifo,key);
+    retval = dictAdd(server.repl_scriptcache_dict, key, NULL);
+    listAddNodeHead(server.repl_scriptcache_fifo, key);
     redisAssert(retval == DICT_OK);
 }
 
 /* Returns non-zero if the specified entry exists inside the cache, that is,
  * if all the slaves are aware of this script SHA1. */
 int replicationScriptCacheExists(sds sha1) {
-    return dictFind(server.repl_scriptcache_dict,sha1) != NULL;
+    return dictFind(server.repl_scriptcache_dict, sha1) != NULL;
 }
 
 /* ----------------------- SYNCHRONOUS REPLICATION --------------------------
@@ -2227,8 +2256,8 @@ int replicationCountAcksByOffset(long long offset) {
     listNode *ln;
     int count = 0;
 
-    listRewind(server.slaves,&li);
-    while((ln = listNext(&li))) {
+    listRewind(server.slaves, &li);
+    while ((ln = listNext(&li))) {
         redisClient *slave = ln->value;
 
         if (slave->replstate != REDIS_REPL_ONLINE) continue;
@@ -2245,15 +2274,16 @@ void waitCommand(redisClient *c) {
     long long offset = c->woff;
 
     /* Argument parsing. */
-    if (getLongFromObjectOrReply(c,c->argv[1],&numreplicas,NULL) != REDIS_OK)
+    if (getLongFromObjectOrReply(c, c->argv[1], &numreplicas, NULL) != REDIS_OK)
         return;
-    if (getTimeoutFromObjectOrReply(c,c->argv[2],&timeout,UNIT_MILLISECONDS)
-        != REDIS_OK) return;
+    if (getTimeoutFromObjectOrReply(c, c->argv[2], &timeout, UNIT_MILLISECONDS)
+        != REDIS_OK)
+        return;
 
     /* First try without blocking at all. */
     ackreplicas = replicationCountAcksByOffset(c->woff);
     if (ackreplicas >= numreplicas || c->flags & REDIS_MULTI) {
-        addReplyLongLong(c,ackreplicas);
+        addReplyLongLong(c, ackreplicas);
         return;
     }
 
@@ -2262,8 +2292,8 @@ void waitCommand(redisClient *c) {
     c->bpop.timeout = timeout;
     c->bpop.reploffset = offset;
     c->bpop.numreplicas = numreplicas;
-    listAddNodeTail(server.clients_waiting_acks,c);
-    blockClient(c,REDIS_BLOCKED_WAIT);
+    listAddNodeTail(server.clients_waiting_acks, c);
+    blockClient(c, REDIS_BLOCKED_WAIT);
 
     /* Make sure that the server will send an ACK request to all the slaves
      * before returning to the event loop. */
@@ -2275,9 +2305,9 @@ void waitCommand(redisClient *c) {
  * waiting for replica acks. Never call it directly, call unblockClient()
  * instead. */
 void unblockClientWaitingReplicas(redisClient *c) {
-    listNode *ln = listSearchKey(server.clients_waiting_acks,c);
+    listNode *ln = listSearchKey(server.clients_waiting_acks, c);
     redisAssert(ln != NULL);
-    listDelNode(server.clients_waiting_acks,ln);
+    listDelNode(server.clients_waiting_acks, ln);
 }
 
 /* Check if there are clients blocked in WAIT that can be unblocked since
@@ -2289,8 +2319,8 @@ void processClientsWaitingReplicas(void) {
     listIter li;
     listNode *ln;
 
-    listRewind(server.clients_waiting_acks,&li);
-    while((ln = listNext(&li))) {
+    listRewind(server.clients_waiting_acks, &li);
+    while ((ln = listNext(&li))) {
         redisClient *c = ln->value;
 
         /* Every time we find a client that is satisfied for a given
@@ -2298,10 +2328,9 @@ void processClientsWaitingReplicas(void) {
          * may be unblocked without calling replicationCountAcksByOffset()
          * if the requested offset / replicas were equal or less. */
         if (last_offset && last_offset > c->bpop.reploffset &&
-                           last_numreplicas > c->bpop.numreplicas)
-        {
+            last_numreplicas > c->bpop.numreplicas) {
             unblockClient(c);
-            addReplyLongLong(c,last_numreplicas);
+            addReplyLongLong(c, last_numreplicas);
         } else {
             int numreplicas = replicationCountAcksByOffset(c->bpop.reploffset);
 
@@ -2309,7 +2338,7 @@ void processClientsWaitingReplicas(void) {
                 last_offset = c->bpop.reploffset;
                 last_numreplicas = numreplicas;
                 unblockClient(c);
-                addReplyLongLong(c,numreplicas);
+                addReplyLongLong(c, numreplicas);
             }
         }
     }
@@ -2345,33 +2374,31 @@ void replicationCron(void) {
     if (server.masterhost &&
         (server.repl_state == REDIS_REPL_CONNECTING ||
          slaveIsInHandshakeState()) &&
-        (time(NULL)-server.repl_transfer_lastio) > server.repl_timeout)
-    {
-        redisLog(REDIS_WARNING,"Timeout connecting to the MASTER...");
+        (time(NULL) - server.repl_transfer_lastio) > server.repl_timeout) {
+        redisLog(REDIS_WARNING, "Timeout connecting to the MASTER...");
         undoConnectWithMaster();
     }
 
     /* Bulk transfer I/O timeout? */
     if (server.masterhost && server.repl_state == REDIS_REPL_TRANSFER &&
-        (time(NULL)-server.repl_transfer_lastio) > server.repl_timeout)
-    {
-        redisLog(REDIS_WARNING,"Timeout receiving bulk data from MASTER... If the problem persists try to set the 'repl-timeout' parameter in redis.conf to a larger value.");
+        (time(NULL) - server.repl_transfer_lastio) > server.repl_timeout) {
+        redisLog(REDIS_WARNING,
+                 "Timeout receiving bulk data from MASTER... If the problem persists try to set the 'repl-timeout' parameter in redis.conf to a larger value.");
         replicationAbortSyncTransfer();
     }
 
     /* Timed out master when we are an already connected slave? */
     if (server.masterhost && server.repl_state == REDIS_REPL_CONNECTED &&
-        (time(NULL)-server.master->lastinteraction) > server.repl_timeout)
-    {
-        redisLog(REDIS_WARNING,"MASTER timeout: no data nor PING received...");
+        (time(NULL) - server.master->lastinteraction) > server.repl_timeout) {
+        redisLog(REDIS_WARNING, "MASTER timeout: no data nor PING received...");
         freeClient(server.master);
     }
 
     /* Check if we should connect to a MASTER */
     if (server.repl_state == REDIS_REPL_CONNECT) {
-        redisLog(REDIS_NOTICE,"Connecting to MASTER...");
+        redisLog(REDIS_NOTICE, "Connecting to MASTER...");
         if (connectWithMaster() == REDIS_OK) {
-            redisLog(REDIS_NOTICE,"MASTER <-> SLAVE sync started");
+            redisLog(REDIS_NOTICE, "MASTER <-> SLAVE sync started");
         }
     }
 
@@ -2386,57 +2413,55 @@ void replicationCron(void) {
      * So slaves can implement an explicit timeout to masters, and will
      * be able to detect a link disconnection even if the TCP connection
      * will not actually go down. */
-        listIter li;
-        listNode *ln;
-        robj *ping_argv[1];
+    listIter li;
+    listNode *ln;
+    robj *ping_argv[1];
 
     /* First, send PING according to ping_slave_period. */
     if ((replication_cron_loops % server.repl_ping_slave_period) == 0) {
-        ping_argv[0] = createStringObject("PING",4);
+        ping_argv[0] = createStringObject("PING", 4);
         replicationFeedSlaves(server.slaves, server.slaveseldb,
-            ping_argv, 1);
+                              ping_argv, 1);
         decrRefCount(ping_argv[0]);
     }
 
-        /* Second, send a newline to all the slaves in pre-synchronization
-         * stage, that is, slaves waiting for the master to create the RDB file.
-         * The newline will be ignored by the slave but will refresh the
-     * last-io timer preventing a timeout. In this case we ignore the
-     * ping period and refresh the connection once per second since certain
-     * timeouts are set at a few seconds (example: PSYNC response). */
-        listRewind(server.slaves,&li);
-        while((ln = listNext(&li))) {
-            redisClient *slave = ln->value;
+    /* Second, send a newline to all the slaves in pre-synchronization
+     * stage, that is, slaves waiting for the master to create the RDB file.
+     * The newline will be ignored by the slave but will refresh the
+ * last-io timer preventing a timeout. In this case we ignore the
+ * ping period and refresh the connection once per second since certain
+ * timeouts are set at a few seconds (example: PSYNC response). */
+    listRewind(server.slaves, &li);
+    while ((ln = listNext(&li))) {
+        redisClient *slave = ln->value;
 
-            if (slave->replstate == REDIS_REPL_WAIT_BGSAVE_START ||
-                (slave->replstate == REDIS_REPL_WAIT_BGSAVE_END &&
-                 server.rdb_child_type != REDIS_RDB_CHILD_TYPE_SOCKET))
-            {
-                if( slave->ssl.ssl != NULL ) {
-                  SSL_write( slave->ssl.ssl,"\n", 1);
-                } else {
-                  if (write(slave->fd, "\n", 1) == -1) {
-                      /* Don't worry, it's just a ping. */
-                  }
+        if (slave->replstate == REDIS_REPL_WAIT_BGSAVE_START ||
+            (slave->replstate == REDIS_REPL_WAIT_BGSAVE_END &&
+             server.rdb_child_type != REDIS_RDB_CHILD_TYPE_SOCKET)) {
+            if (slave->ssl.ssl != NULL) {
+                SSL_write(slave->ssl.ssl, "\n", 1);
+            } else {
+                if (write(slave->fd, "\n", 1) == -1) {
+                    /* Don't worry, it's just a ping. */
                 }
             }
         }
+    }
 
     /* Disconnect timedout slaves. */
     if (listLength(server.slaves)) {
         listIter li;
         listNode *ln;
 
-        listRewind(server.slaves,&li);
-        while((ln = listNext(&li))) {
+        listRewind(server.slaves, &li);
+        while ((ln = listNext(&li))) {
             redisClient *slave = ln->value;
 
             if (slave->replstate != REDIS_REPL_ONLINE) continue;
             if (slave->flags & REDIS_PRE_PSYNC) continue;
-            if ((server.unixtime - slave->repl_ack_time) > server.repl_timeout)
-            {
+            if ((server.unixtime - slave->repl_ack_time) > server.repl_timeout) {
                 redisLog(REDIS_WARNING, "Disconnecting timedout slave: %s",
-                    replicationGetSlaveName(slave));
+                         replicationGetSlaveName(slave));
                 freeClient(slave);
             }
         }
@@ -2445,16 +2470,15 @@ void replicationCron(void) {
     /* If we have no attached slaves and there is a replication backlog
      * using memory, free it after some (configured) time. */
     if (listLength(server.slaves) == 0 && server.repl_backlog_time_limit &&
-        server.repl_backlog)
-    {
+        server.repl_backlog) {
         time_t idle = server.unixtime - server.repl_no_slaves_since;
 
         if (idle > server.repl_backlog_time_limit) {
             freeReplicationBacklog();
             redisLog(REDIS_NOTICE,
-                "Replication backlog freed after %d seconds "
-                "without connected slaves.",
-                (int) server.repl_backlog_time_limit);
+                     "Replication backlog freed after %d seconds "
+                             "without connected slaves.",
+                     (int) server.repl_backlog_time_limit);
         }
     }
 
@@ -2463,8 +2487,7 @@ void replicationCron(void) {
      * EVALSHA at all. */
     if (listLength(server.slaves) == 0 &&
         server.aof_state == REDIS_AOF_OFF &&
-        listLength(server.repl_scriptcache_fifo) != 0)
-    {
+        listLength(server.repl_scriptcache_fifo) != 0) {
         replicationScriptCacheFlush();
     }
 
@@ -2482,15 +2505,15 @@ void replicationCron(void) {
         listNode *ln;
         listIter li;
 
-        listRewind(server.slaves,&li);
-        while((ln = listNext(&li))) {
+        listRewind(server.slaves, &li);
+        while ((ln = listNext(&li))) {
             redisClient *slave = ln->value;
             if (slave->replstate == REDIS_REPL_WAIT_BGSAVE_START) {
                 idle = server.unixtime - slave->lastinteraction;
                 if (idle > max_idle) max_idle = idle;
                 slaves_waiting++;
                 mincapa = (mincapa == -1) ? slave->slave_capa :
-                                            (mincapa & slave->slave_capa);
+                          (mincapa & slave->slave_capa);
             }
         }
 

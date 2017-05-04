@@ -40,16 +40,24 @@
 #endif
 
 int redisCheckSocketError(redisContext *c);
+
 int redisContextSetTimeout(redisContext *c, const struct timeval tv);
+
 int redisContextConnectTcp(redisContext *c, const char *addr, int port, const struct timeval *timeout);
+
 int redisContextConnectBindTcp(redisContext *c, const char *addr, int port,
                                const struct timeval *timeout,
                                const char *source_addr);
+
 int redisContextConnectUnix(redisContext *c, const char *path, const struct timeval *timeout);
+
 int redisKeepAlive(redisContext *c, int interval);
 
-int redisContextConnectSSL(redisContext *c, const char *addr, int port, char* certfile, char* certdir, struct timeval *timeout);
-void cleanupSSL( SSLConnection* ctn );
+int redisContextConnectSSL(redisContext *c, const char *addr, int port, char *tlsversion, char *certfile, char *certdir,
+                           struct timeval *timeout);
+
+void cleanupSSL(SSLConnection *ctn);
+
 void setupSSL();
 
 
